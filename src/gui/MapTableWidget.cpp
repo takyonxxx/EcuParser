@@ -18,25 +18,44 @@
 
 namespace EcuParser {
 
-// Colours chosen to mirror the reference tool's "Edit map" window:
+// Colours chosen to mirror a typical light "Edit map" theme:
 //   - light grey/white cell background
 //   - blue header text on a slightly darker header band (we use the
 //     stylesheet for the header band itself)
 //   - black cell text
-//   - changed cells get a light green tint exactly like the reference tool marks edits.
+//   - changed cells get a light green tint, similar to how reference
+//     tools mark edits.
 namespace palette {
     const QColor kCellBg          (245, 246, 248);
     const QColor kCellAlt         (236, 238, 242);
     const QColor kCellText        ( 25,  30,  40);
-    const QColor kChangedBg       (170, 230, 170);   // the reference tool-edit-green
+    const QColor kChangedBg       (170, 230, 170);   // edit-green
     const QColor kChangedText     ( 10,  60,  20);
     const QColor kIncreasedTint   (210, 240, 210);   // mod > orig
     const QColor kDecreasedTint   (240, 215, 210);   // mod < orig (light pinky)
+    // Background outside the cells (the area below the last row, the
+    // panel behind the title and status labels). A muted slate keeps
+    // the eye on the cells and stops a big white expanse from glaring
+    // when the map is small.
+    const QColor kPanelBg         (210, 215, 222);   // slate
+    const QColor kViewportBg      (210, 215, 222);   // same slate behind the cells
 }
 
 MapTableWidget::MapTableWidget(QWidget *parent)
     : QWidget(parent)
 {
+    // Paint our own panel background instead of inheriting the
+    // application palette. We use a stylesheet rather than only
+    // setPalette() because palettes don't always win against a dark
+    // application style - QSS does. The viewport gets the same colour
+    // so the empty area below the last row blends into the panel.
+    setObjectName(QStringLiteral("MapTablePanel"));
+    setStyleSheet(QStringLiteral(
+        "QWidget#MapTablePanel { background-color: #B8C0CC; }"
+        "QTableWidget#MapTable { background-color: #B8C0CC; }"
+        "QTableWidget#MapTable QAbstractItemView { background-color: #B8C0CC; }"
+    ));
+
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(4, 4, 4, 4);
     layout->setSpacing(4);
@@ -49,6 +68,7 @@ MapTableWidget::MapTableWidget(QWidget *parent)
     layout->addWidget(m_titleLabel);
 
     m_table = new QTableWidget(this);
+    m_table->setObjectName(QStringLiteral("MapTable"));
     // Editable; parent watches itemChanged to commit back to the bin.
     m_table->setEditTriggers(QAbstractItemView::DoubleClicked
                              | QAbstractItemView::EditKeyPressed
@@ -63,6 +83,7 @@ MapTableWidget::MapTableWidget(QWidget *parent)
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Fixed);
     m_table->horizontalHeader()->setDefaultSectionSize(64);
     m_table->verticalHeader()->setDefaultSectionSize(22);
+    m_table->setFrameShape(QFrame::NoFrame);
     layout->addWidget(m_table, 1);
 
     m_statusLabel = new QLabel(this);

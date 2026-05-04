@@ -23,6 +23,7 @@ HEADERS += \
     src/core/DrtParser.h \
     src/core/BinFile.h \
     src/core/MapData.h \
+    src/core/StagePackage.h \
     src/model/AxisDefinition.h \
     src/model/MapDefinition.h \
     src/model/DriverModel.h \
@@ -38,6 +39,7 @@ SOURCES += \
     src/core/DrtParser.cpp \
     src/core/BinFile.cpp \
     src/core/MapData.cpp \
+    src/core/StagePackage.cpp \
     src/model/MapCategory.cpp \
     src/model/DriverNames.cpp \
     src/gui/MainWindow.cpp \

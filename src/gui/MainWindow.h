@@ -47,6 +47,7 @@ private slots:
     void onMapSelected(const MapDefinition *map, int addressIndex);
     void onCopyOriginalToModified();
     void onExportModifiedBin();
+    void onApplyStage();
     void onCellEdited(const MapDefinition *map, int instanceIndex,
                       int row, int col, qint32 newValue);
     void onBulkEditBegin();
@@ -70,6 +71,7 @@ private:
     QComboBox  *m_modBinCombo  = nullptr;
     QPushButton *m_copyOriBtn = nullptr;
     QPushButton *m_exportBtn  = nullptr;
+    QPushButton *m_applyStageBtn = nullptr;
 
     // Central widgets
     QLabel           *m_summaryLabel = nullptr;

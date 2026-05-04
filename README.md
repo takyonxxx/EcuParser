@@ -6,10 +6,12 @@ EDC15C bin files in side-by-side comparison mode. Load an original
 defined by the driver as either a table or a graph, edit cells, and
 export the modified bin back to disk.
 
-## Supported driver: J293_822 (Jeep WJ 2.7 CRD, EDC15C, schema 28F0_100)
+## Supported driver: J293_822 / J094_704 / J409_438 (Jeep WJ 2.7 CRD, EDC15C, schema 28F0_100)
 
-Eleven maps reverse-engineered and verified against a real Stage1
-file. The addresses and dimensions are hard-coded in
+The three drivers are **byte-identical** because the map layout is the
+same across all SW revisions of the Jeep 2.7 CRD; only the underlying
+firmware differs. Eleven maps reverse-engineered and verified against a
+real Stage1 file. The addresses and dimensions are hard-coded in
 `src/model/DriverNames.cpp` because the dim fields in the `.drt` are
 unreliable for some maps and need to be overridden.
 
@@ -101,7 +103,7 @@ src/model/  DriverModel, MapDefinition, AxisDefinition, MapCategory,
             DriverNames (canonical name + override table)
 src/gui/    MainWindow, DriverTreeWidget, MapTableWidget,
             MapGraphWidget, AppPaths
-data/       J293_822.drt + sample bins
+data/       Three Jeep 2.7 CRD calibrations + sample bins (see data/README.md)
 ```
 
 ## Building

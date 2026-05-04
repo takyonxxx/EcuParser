@@ -7,14 +7,19 @@
 #include "MapTableWidget.h"
 #include "../core/DrtParser.h"
 #include "../core/MapData.h"
+#include "../core/StagePackage.h"
 
 #include <QAction>
 #include <QComboBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QKeySequence>
 #include <QLabel>
+#include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
+#include <QInputDialog>
 #include <QPushButton>
 #include <QSplitter>
 #include <QStatusBar>
@@ -40,10 +45,14 @@ void MainWindow::buildUi()
     auto *bar = addToolBar(QStringLiteral("main"));
     bar->setMovable(false);
     bar->setIconSize(QSize(16, 16));
+    // Narrower combos so all three (Driver, Original, Modified) plus
+    // the action buttons fit on a typical 1366-1600 px wide window
+    // without the right-most buttons overflowing into invisibility.
+    constexpr int kComboW = 180;
 
     bar->addWidget(new QLabel(QStringLiteral("  Driver: "), this));
     m_driverCombo = new QComboBox(this);
-    m_driverCombo->setMinimumWidth(220);
+    m_driverCombo->setMinimumWidth(kComboW);
     bar->addWidget(m_driverCombo);
     auto *browseDrvBtn = new QPushButton(QStringLiteral("..."), this);
     browseDrvBtn->setFixedWidth(28);
@@ -53,7 +62,7 @@ void MainWindow::buildUi()
     bar->addSeparator();
     bar->addWidget(new QLabel(QStringLiteral("  Original: "), this));
     m_origBinCombo = new QComboBox(this);
-    m_origBinCombo->setMinimumWidth(220);
+    m_origBinCombo->setMinimumWidth(kComboW);
     bar->addWidget(m_origBinCombo);
     auto *browseOrigBtn = new QPushButton(QStringLiteral("..."), this);
     browseOrigBtn->setFixedWidth(28);
@@ -62,7 +71,7 @@ void MainWindow::buildUi()
     bar->addSeparator();
     bar->addWidget(new QLabel(QStringLiteral("  Modified: "), this));
     m_modBinCombo = new QComboBox(this);
-    m_modBinCombo->setMinimumWidth(220);
+    m_modBinCombo->setMinimumWidth(kComboW);
     bar->addWidget(m_modBinCombo);
     auto *browseModBtn = new QPushButton(QStringLiteral("..."), this);
     browseModBtn->setFixedWidth(28);
@@ -74,9 +83,42 @@ void MainWindow::buildUi()
         QStringLiteral("Copy original values of the selected map into the modified bin"));
     bar->addWidget(m_copyOriBtn);
 
+    m_applyStageBtn = new QPushButton(QStringLiteral("Apply Stage..."), this);
+    m_applyStageBtn->setToolTip(QStringLiteral(
+        "Apply a pre-defined Stage1 / Stage2 tune to the modified bin "
+        "using the original as the source. The original is unchanged."));
+    bar->addWidget(m_applyStageBtn);
+
     m_exportBtn = new QPushButton(QStringLiteral("Export modified..."), this);
-    m_exportBtn->setToolTip(QStringLiteral("Save the modified bin to disk"));
+    m_exportBtn->setToolTip(QStringLiteral("Save the modified bin to disk (Ctrl+E)"));
     bar->addWidget(m_exportBtn);
+
+    // ====== Menu bar ======
+    // We mirror every toolbar action under File / Tools menus too,
+    // because if the user's window is narrow the toolbar can overflow
+    // and the right-most button (Export) becomes hidden. The menu
+    // entries are always reachable, and they expose keyboard
+    // shortcuts: Ctrl+E to export, Ctrl+T to apply a stage, Ctrl+R
+    // to copy original into modified.
+    auto *fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
+    auto *exportAct = fileMenu->addAction(QStringLiteral("&Export modified..."));
+    exportAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+E")));
+    connect(exportAct, &QAction::triggered,
+            this, &MainWindow::onExportModifiedBin);
+    fileMenu->addSeparator();
+    auto *quitAct = fileMenu->addAction(QStringLiteral("&Quit"));
+    quitAct->setShortcut(QKeySequence::Quit);
+    connect(quitAct, &QAction::triggered, this, &QMainWindow::close);
+
+    auto *toolsMenu = menuBar()->addMenu(QStringLiteral("&Tools"));
+    auto *stageAct = toolsMenu->addAction(QStringLiteral("Apply &Stage..."));
+    stageAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+T")));
+    connect(stageAct, &QAction::triggered,
+            this, &MainWindow::onApplyStage);
+    auto *copyAct = toolsMenu->addAction(QStringLiteral("Copy O&riginal -> Modified"));
+    copyAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+R")));
+    connect(copyAct, &QAction::triggered,
+            this, &MainWindow::onCopyOriginalToModified);
 
     // ====== Central area ======
     auto *central = new QWidget(this);
@@ -120,6 +162,8 @@ void MainWindow::buildUi()
             this, &MainWindow::onMapSelected);
     connect(m_copyOriBtn, &QPushButton::clicked,
             this, &MainWindow::onCopyOriginalToModified);
+    connect(m_applyStageBtn, &QPushButton::clicked,
+            this, &MainWindow::onApplyStage);
     connect(m_exportBtn, &QPushButton::clicked,
             this, &MainWindow::onExportModifiedBin);
     connect(m_tableView, &MapTableWidget::cellEdited,
@@ -247,6 +291,7 @@ bool MainWindow::loadOriginalBin(const QString &path)
             .arg(m_origBin->size()),
         4000);
     refreshTitle();
+    m_tree->setBins(m_origBin.get(), m_modBin.get());
     refreshCurrentMap();
     return true;
 }
@@ -269,6 +314,7 @@ bool MainWindow::loadModifiedBin(const QString &path)
             .arg(m_modBin->size()),
         4000);
     refreshTitle();
+    m_tree->setBins(m_origBin.get(), m_modBin.get());
     refreshCurrentMap();
     return true;
 }
@@ -340,6 +386,7 @@ void MainWindow::onCellEdited(const MapDefinition *map, int instanceIndex,
     if (!m_bulkEditInProgress) {
         refreshTitle();
         refreshCurrentMap();
+        m_tree->refreshDiffHighlights();
     }
 }
 
@@ -353,6 +400,7 @@ void MainWindow::onBulkEditEnd()
     m_bulkEditInProgress = false;
     refreshTitle();
     refreshCurrentMap();
+    m_tree->refreshDiffHighlights();
 }
 
 void MainWindow::onCopyOriginalToModified()
@@ -414,10 +462,121 @@ void MainWindow::onCopyOriginalToModified()
     m_modDirty = true;
     refreshTitle();
     refreshCurrentMap();
+    m_tree->refreshDiffHighlights();
     statusBar()->showMessage(
         QStringLiteral("Copied %1 bytes of '%2' from ORI to MOD")
             .arg(len).arg(humanName),
         4000);
+}
+
+void MainWindow::onApplyStage()
+{
+    if (!m_driver) {
+        QMessageBox::information(this, QStringLiteral("Apply stage"),
+            QStringLiteral("Load a driver first."));
+        return;
+    }
+    if (!m_origBin) {
+        QMessageBox::information(this, QStringLiteral("Apply stage"),
+            QStringLiteral("Load an Original bin first - the stage uses it "
+                           "as the source. Modified will receive the result."));
+        return;
+    }
+    if (!m_modBin) {
+        QMessageBox::information(this, QStringLiteral("Apply stage"),
+            QStringLiteral("Load a Modified bin first (or pick an Original; "
+                           "Modified is auto-mirrored)."));
+        return;
+    }
+
+    // Discover the available stage packages under data/stages/.
+    const auto stages = StagePackage::listAvailable();
+    if (stages.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Apply stage"),
+            QStringLiteral("No stage packages found in data/stages/."));
+        return;
+    }
+
+    // Build a small picker dialog: a label with names + descriptions
+    // and Yes/No buttons. We use QInputDialog::getItem for a simple
+    // single-pick UI - good enough for the current handful of stages.
+    QStringList items;
+    for (const auto &s : stages)
+        items.append(s.first);
+    bool ok = false;
+    const QString chosen = QInputDialog::getItem(
+        this, QStringLiteral("Apply stage"),
+        QStringLiteral("Select a stage to apply (Original is the source, "
+                       "Modified is overwritten):"),
+        items, 0, false, &ok);
+    if (!ok || chosen.isEmpty())
+        return;
+
+    // Resolve back to file path.
+    QString path;
+    for (const auto &s : stages) {
+        if (s.first == chosen) { path = s.second; break; }
+    }
+    if (path.isEmpty())
+        return;
+
+    // Load the stage package now (we already loaded once for the
+    // listing, but loading is cheap and keeps this slot self-contained).
+    StagePackage pkg;
+    QString err;
+    if (!StagePackage::loadFromJson(path, &pkg, &err)) {
+        QMessageBox::warning(this, QStringLiteral("Apply stage"),
+            QStringLiteral("Failed to load %1:\n%2").arg(QFileInfo(path).fileName(), err));
+        return;
+    }
+
+    // Confirmation dialog summarises what's about to happen so the user
+    // doesn't accidentally clobber the Modified bin.
+    const QString confirmMsg = QStringLiteral(
+        "Apply '%1' to the modified bin?\n\n"
+        "%2\n\n"
+        "Source: Original (%3)\n"
+        "Target: Modified (%4)\n\n"
+        "This overwrites every cell touched by the stage. The original "
+        "bin is not changed.")
+        .arg(pkg.name)
+        .arg(pkg.description.isEmpty()
+                 ? QStringLiteral("(no description)")
+                 : pkg.description)
+        .arg(QFileInfo(m_origBinCombo->currentText()).fileName())
+        .arg(QFileInfo(m_modBinPath).fileName());
+    if (QMessageBox::question(this, QStringLiteral("Apply stage"),
+                              confirmMsg,
+                              QMessageBox::Yes | QMessageBox::No)
+        != QMessageBox::Yes)
+        return;
+
+    // First reset Modified to a copy of Original so re-applying a stage
+    // is idempotent (otherwise applying Stage1 then Stage2 would
+    // compound percentages on already-edited cells). writeBytes is a
+    // simple bulk overwrite at offset 0.
+    if (!m_modBin->writeBytes(0, m_origBin->raw())) {
+        QMessageBox::warning(this, QStringLiteral("Apply stage"),
+            QStringLiteral("Could not reset Modified bin (size mismatch?)"));
+        return;
+    }
+
+    QStringList warnings;
+    const int written = applyStage(pkg, *m_driver, *m_origBin,
+                                   m_modBin.get(), &warnings);
+    m_modDirty = (written > 0);
+    refreshTitle();
+    refreshCurrentMap();
+    m_tree->refreshDiffHighlights();
+
+    QString summary = QStringLiteral("'%1' applied: %2 cells written.")
+                          .arg(pkg.name).arg(written);
+    if (!warnings.isEmpty())
+        summary += QStringLiteral("\n\nWarnings:\n  - ")
+                   + warnings.join(QStringLiteral("\n  - "));
+    statusBar()->showMessage(QStringLiteral("Applied stage '%1' (%2 cells)")
+                                 .arg(pkg.name).arg(written), 5000);
+    QMessageBox::information(this, QStringLiteral("Apply stage"), summary);
 }
 
 void MainWindow::onExportModifiedBin()

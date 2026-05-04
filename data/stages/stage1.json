@@ -1,0 +1,53 @@
+{
+  "name": "Stage 1",
+  "description": "Conservative tune + EGR off. ~+15-18% torque, drivability-friendly. Lifts injection, rail pressure and torque limiter at higher RPM/load only. Compatible with stock turbo and stock injectors. EGR is software-disabled by saturating the phase-of-injection map to its own factory ceiling.",
+  "schemas": ["28F0_100"],
+  "edits": [
+    {
+      "map": "injection at part throttle",
+      "pct": 18,
+      "row_min": 7,
+      "col_min": 11,
+      "comment": "+18% main fueling at high RPM x high load (rows 7..15 x cols 11..15). Mirrors the real Stage1 reference."
+    },
+    {
+      "map": "rail pressure",
+      "pct": 11,
+      "row_min": 4,
+      "col_min": 10,
+      "max_value": 26000,
+      "comment": "+11% rail pressure at mid-high RPM x high load. Capped to keep within injector spray-in window."
+    },
+    {
+      "map": "fuel during acceleration",
+      "pct": 7,
+      "col_min": 8,
+      "comment": "+7% transient fueling at high load - improves throttle response."
+    },
+    {
+      "map": "fuel during acceleration (Map 2)",
+      "pct": 14,
+      "col_min": 8,
+      "comment": "+14% on the secondary acceleration map."
+    },
+    {
+      "map": "turbo pressure",
+      "pct": 5,
+      "row_min": 4,
+      "col_min": 6,
+      "comment": "+5% boost target at mid RPM x mid-high load. Conservative to avoid overspeeding the stock turbo."
+    },
+    {
+      "map": "torque limiter",
+      "pct": 13,
+      "row_min": 4,
+      "max_value": 9000,
+      "comment": "+13% torque limit ceiling at mid-to-high RPM (rows 4..15), capped at 9000."
+    },
+    {
+      "map": "phase of injection",
+      "set_to_map_max": true,
+      "comment": "EGR off: setting every phase-of-injection cell to the map's own factory maximum disengages EGR closed-loop control. The ECU sees a flat reference and stops actuating the EGR valve - software-only EGR delete with no hardware blanking plate required."
+    }
+  ]
+}

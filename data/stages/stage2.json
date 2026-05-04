@@ -1,0 +1,55 @@
+{
+  "name": "Stage 2",
+  "description": "Aggressive tune + EGR off. ~+30% torque. Requires healthy injectors; intercooler upgrade strongly recommended; exhaust de-restriction recommended. NOT for stock turbo at sustained full load. EGR is software-disabled.",
+  "schemas": ["28F0_100"],
+  "edits": [
+    {
+      "map": "injection at part throttle",
+      "pct": 32,
+      "row_min": 6,
+      "col_min": 9,
+      "max_value": 9500,
+      "comment": "+32% main fueling at mid-high RPM x mid-high load. Larger area than Stage1, capped to avoid black smoke."
+    },
+    {
+      "map": "rail pressure",
+      "pct": 17,
+      "row_min": 3,
+      "col_min": 9,
+      "max_value": 28000,
+      "comment": "+17% rail pressure for finer atomisation under the bigger fueling. Capped 28000 to stay below pump wear limit."
+    },
+    {
+      "map": "fuel during acceleration",
+      "pct": 14,
+      "col_min": 7,
+      "comment": "+14% transient fueling, broader col range."
+    },
+    {
+      "map": "fuel during acceleration (Map 2)",
+      "pct": 22,
+      "col_min": 7,
+      "comment": "+22% on the secondary acceleration map."
+    },
+    {
+      "map": "turbo pressure",
+      "pct": 10,
+      "row_min": 3,
+      "col_min": 5,
+      "max_value": 1900,
+      "comment": "+10% boost target across a wider RPM x load region. Capped at 1900 (raw counts) to keep below VGT vane overshoot."
+    },
+    {
+      "map": "torque limiter",
+      "pct": 50,
+      "row_min": 4,
+      "max_value": 9500,
+      "comment": "+50% torque limit ceiling, capped 9500. Intended to clear the limiter at mid-RPM where Stage2 fueling produces real torque."
+    },
+    {
+      "map": "phase of injection",
+      "set_to_map_max": true,
+      "comment": "EGR off: same software EGR delete as Stage1 - flatten phase-of-injection map to its factory ceiling so the ECU disengages EGR closed-loop control."
+    }
+  ]
+}

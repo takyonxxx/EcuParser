@@ -7,6 +7,8 @@
 
 namespace EcuParser {
 
+class BinFile;
+
 // Tree view of a driver's maps grouped by category, mirroring the reference tool's
 // "Available maps" pane on the right side of the main window.
 //
@@ -25,6 +27,17 @@ public:
     // (currently unused; kept for future extension).
     void setDriver(const DriverModel *driver);
 
+    // Provide the pair of bins the table/graph views are showing so each
+    // map item can render in a different colour when its cells differ
+    // between Original and Modified. Pass nullptrs to suppress
+    // colouring (e.g. before any bin is loaded). Triggers an
+    // immediate re-colour of every map item.
+    void setBins(const BinFile *original, const BinFile *modified);
+
+    // Re-evaluate every map's diff status and update item colours. Call
+    // after edits so the tree highlight follows the user's changes.
+    void refreshDiffHighlights();
+
 signals:
     // Fired when the user clicks on a leaf (map) item. addressIndex is the
     // index into MapDefinition::addresses for which sub-instance the user
@@ -37,6 +50,8 @@ private slots:
 
 private:
     const DriverModel *m_driver = nullptr;
+    const BinFile *m_origBin = nullptr;
+    const BinFile *m_modBin = nullptr;
 
     // Custom roles for QTreeWidgetItem data() so we can map clicks back to
     // the underlying MapDefinition without walking the model again.
