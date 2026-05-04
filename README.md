@@ -6,6 +6,38 @@ EDC15C bin files in side-by-side comparison mode. Load an original
 defined by the driver as either a table or a graph, edit cells, and
 export the modified bin back to disk.
 
+## Driver formats
+
+EcuParser reads two driver formats:
+
+- **`.drt`** - the format we reverse-engineered ourselves; what most of
+  the bundled `data/J*.drt` files use.
+- **`.xdf`** - TunerPro Definition File. XML-based, open, widely shared
+  in the open-source tuning community. Drop XDFs in `data/` or
+  `data/xdf/` and they'll appear in the Driver combo alongside DRTs.
+
+The XDF parser implements the subset most XDFs in the wild use:
+
+- Top-level `<XDFHEADER>` description
+- `<CATEGORY>` index/name for grouping
+- `<XDFTABLE>` with `<title>`, `<description>`, `<CATEGORYMEM>`
+- One `<XDFAXIS id="z">` per table carrying `<EMBEDDEDDATA>` with
+  `mmedaddress`, `mmedelementsizebits`, `mmedrowcount`, `mmedcolcount`
+- X and Y axes for breakpoint addresses
+
+Currently NOT interpreted (cells are read as raw u16 LE):
+
+- `<MATH equation="...">` formulas (raw values shown instead of
+  scaled physical units)
+- `<XDFCONSTANT>`, `<XDFFLAG>` (single values and bit flags)
+- Per-table endianness/sign overrides (we read header `<DEFAULTS>`
+  and assume LE u16)
+
+A sample XDF for J293_822 lives at `data/xdf/J293_822_example.xdf` -
+hand-crafted from the addresses we reverse-engineered, byte-identical
+in behaviour to the J293_822.drt driver. Use it as a starting point
+when authoring XDFs for new schemas.
+
 ## Supported driver: J293_822 / J094_704 / J409_438 (Jeep WJ 2.7 CRD, EDC15C, schema 28F0_100)
 
 The three drivers are **byte-identical** because the map layout is the

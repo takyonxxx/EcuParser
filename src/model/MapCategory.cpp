@@ -48,6 +48,12 @@ QString AxisDefinition::toDebugString() const
 // ============================================================
 QString MapDefinition::displayName() const
 {
+    // If the parser supplied a human-readable name (XDF <title>),
+    // use it directly. This takes priority over any type-code logic
+    // because XDF authors write descriptive titles.
+    if (!name.isEmpty())
+        return name;
+
     // Without a canonical mapping table from MapDesc/ files, provide
     // sensible English labels based on type code prefix. Phase 2 will
     // override these from per-driver descriptions.

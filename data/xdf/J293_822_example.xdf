@@ -1,0 +1,147 @@
+<!DOCTYPE XDFFORMAT SYSTEM "xdf.dtd">
+<XDFFORMAT version="1.50">
+  <XDFHEADER>
+    <flags>0x0</flags>
+    <description>Jeep WJ 2.7 CRD - EDC15C - schema 28F0_100 - calibration J293_822
+Hand-crafted XDF derived from reverse-engineered map addresses verified
+against a real Stage 1 reference file. Cells are 16-bit little-endian.</description>
+    <author>EcuParser project (cleanroom)</author>
+    <BASEOFFSET offset="0x0" subtract="0"/>
+    <DEFAULTS datasizeinbits="16" sigdigits="0" outputtype="1" signed="0"
+              lsbfirst="1" float="0"/>
+    <REGION type="0xFFFFFFFF" startaddress="0x0" size="0x80000"
+            regionflags="0x0" name="Whole flash" desc="Full 512 KiB ECU dump"/>
+    <CATEGORY index="0x0" name="Injection"/>
+    <CATEGORY index="0x1" name="Boost"/>
+    <CATEGORY index="0x2" name="Limiters"/>
+  </XDFHEADER>
+
+  <XDFTABLE uniqueid="0x101" flags="0x30">
+    <title>Injection at part throttle</title>
+    <description>Main fueling map. RPM x Load.</description>
+    <CATEGORYMEM index="0" category="1"/>
+    <XDFAXIS id="x" uniqueid="0x0">
+      <EMBEDDEDDATA mmedaddress="0x76F0E" mmedelementsizebits="16" mmedrowcount="16"/>
+      <units>RPM</units>
+      <indexcount>16</indexcount>
+      <datatype>0</datatype>
+      <unittype>0</unittype>
+      <DALINK index="0"/>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+    <XDFAXIS id="y" uniqueid="0x0">
+      <EMBEDDEDDATA mmedaddress="0x0" mmedelementsizebits="16" mmedrowcount="16"/>
+      <units>Load</units>
+      <indexcount>16</indexcount>
+      <datatype>0</datatype>
+      <unittype>0</unittype>
+      <DALINK index="0"/>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+    <XDFAXIS id="z">
+      <EMBEDDEDDATA mmedaddress="0x76F52" mmedelementsizebits="16"
+                    mmedrowcount="16" mmedcolcount="16"/>
+      <decimalpl>0</decimalpl>
+      <min>0</min>
+      <max>65535</max>
+      <outputtype>1</outputtype>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+  </XDFTABLE>
+
+  <XDFTABLE uniqueid="0x102" flags="0x30">
+    <title>Rail pressure</title>
+    <description>Rail pressure setpoint. RPM x Load.</description>
+    <CATEGORYMEM index="0" category="1"/>
+    <XDFAXIS id="x" uniqueid="0x0">
+      <EMBEDDEDDATA mmedaddress="0x0" mmedelementsizebits="16" mmedrowcount="16"/>
+      <units>RPM</units>
+      <indexcount>16</indexcount>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+    <XDFAXIS id="y" uniqueid="0x0">
+      <EMBEDDEDDATA mmedaddress="0x0" mmedelementsizebits="16" mmedrowcount="16"/>
+      <units>Load</units>
+      <indexcount>16</indexcount>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+    <XDFAXIS id="z">
+      <EMBEDDEDDATA mmedaddress="0x7ADD2" mmedelementsizebits="16"
+                    mmedrowcount="16" mmedcolcount="16"/>
+      <decimalpl>0</decimalpl>
+      <units>raw</units>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+  </XDFTABLE>
+
+  <XDFTABLE uniqueid="0x107" flags="0x30">
+    <title>Phase of injection</title>
+    <description>Injection timing. Saturating to map max disengages EGR feedback.</description>
+    <CATEGORYMEM index="0" category="1"/>
+    <XDFAXIS id="x" uniqueid="0x0">
+      <EMBEDDEDDATA mmedaddress="0x71F16" mmedelementsizebits="16" mmedrowcount="12"/>
+      <units>RPM</units>
+      <indexcount>12</indexcount>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+    <XDFAXIS id="y" uniqueid="0x0">
+      <EMBEDDEDDATA mmedaddress="0x0" mmedelementsizebits="16" mmedrowcount="16"/>
+      <units>Load</units>
+      <indexcount>16</indexcount>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+    <XDFAXIS id="z">
+      <EMBEDDEDDATA mmedaddress="0x71F52" mmedelementsizebits="16"
+                    mmedrowcount="12" mmedcolcount="16"/>
+      <decimalpl>0</decimalpl>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+  </XDFTABLE>
+
+  <XDFTABLE uniqueid="0x10A" flags="0x30">
+    <title>Turbo pressure</title>
+    <description>Boost target. RPM x Load.</description>
+    <CATEGORYMEM index="0" category="2"/>
+    <XDFAXIS id="x" uniqueid="0x0">
+      <EMBEDDEDDATA mmedaddress="0x75E6C" mmedelementsizebits="16" mmedrowcount="12"/>
+      <units>RPM</units>
+      <indexcount>12</indexcount>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+    <XDFAXIS id="y" uniqueid="0x0">
+      <EMBEDDEDDATA mmedaddress="0x0" mmedelementsizebits="16" mmedrowcount="12"/>
+      <units>Load</units>
+      <indexcount>12</indexcount>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+    <XDFAXIS id="z">
+      <EMBEDDEDDATA mmedaddress="0x75EA0" mmedelementsizebits="16"
+                    mmedrowcount="12" mmedcolcount="12"/>
+      <decimalpl>0</decimalpl>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+  </XDFTABLE>
+
+  <XDFTABLE uniqueid="0x10B" flags="0x30">
+    <title>Torque limiter</title>
+    <description>Maximum torque per RPM. 1D table (19 cells).</description>
+    <CATEGORYMEM index="0" category="3"/>
+    <XDFAXIS id="x" uniqueid="0x0">
+      <EMBEDDEDDATA mmedaddress="0x76D5C" mmedelementsizebits="16" mmedrowcount="19"/>
+      <units>RPM</units>
+      <indexcount>19</indexcount>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+    <XDFAXIS id="y" uniqueid="0x0">
+      <indexcount>1</indexcount>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+    <XDFAXIS id="z">
+      <EMBEDDEDDATA mmedaddress="0x76D82" mmedelementsizebits="16"
+                    mmedrowcount="19" mmedcolcount="1"/>
+      <decimalpl>0</decimalpl>
+      <MATH equation="X"><VAR id="X"/></MATH>
+    </XDFAXIS>
+  </XDFTABLE>
+
+</XDFFORMAT>

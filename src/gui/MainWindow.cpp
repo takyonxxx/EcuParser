@@ -8,6 +8,7 @@
 #include "../core/DrtParser.h"
 #include "../core/MapData.h"
 #include "../core/StagePackage.h"
+#include "../core/XdfParser.h"
 
 #include <QAction>
 #include <QCheckBox>
@@ -261,7 +262,17 @@ void MainWindow::onModifiedBinComboChanged(int index)
 bool MainWindow::loadDriver(const QString &path)
 {
     QString err;
-    auto parsed = DrtParser::parseFile(path, &err);
+    std::optional<DriverModel> parsed;
+    // Pick the parser based on extension. .xdf files come from
+    // TunerPro and the wider open-source tuning community; .drt are
+    // the format we reverse-engineered ourselves. Both produce the
+    // same DriverModel, so the rest of the app stays unchanged.
+    const QString ext = QFileInfo(path).suffix().toLower();
+    if (ext == QStringLiteral("xdf")) {
+        parsed = XdfParser::parseFile(path, &err);
+    } else {
+        parsed = DrtParser::parseFile(path, &err);
+    }
     if (!parsed) {
         QMessageBox::warning(this, QStringLiteral("Driver load"),
                              QStringLiteral("Failed to parse %1:\n%2").arg(path, err));
@@ -273,9 +284,10 @@ bool MainWindow::loadDriver(const QString &path)
     m_graphView->clear();
     refreshTitle();
     statusBar()->showMessage(
-        QStringLiteral("Driver loaded: %1 (%2 maps)")
+        QStringLiteral("Driver loaded: %1 (%2 maps, format: %3)")
             .arg(QFileInfo(path).fileName())
-            .arg(m_driver->maps.size()),
+            .arg(m_driver->maps.size())
+            .arg(ext.toUpper()),
         4000);
     return true;
 }
@@ -712,7 +724,7 @@ void MainWindow::onBrowseDriver()
 {
     const QString p = QFileDialog::getOpenFileName(
         this, QStringLiteral("Open driver"), AppPaths::dataDir(),
-        QStringLiteral("Driver files (*.drt);;All files (*)"));
+        QStringLiteral("Driver files (*.drt *.xdf);;DRT files (*.drt);;TunerPro XDF (*.xdf);;All files (*)"));
     if (p.isEmpty()) return;
     if (!loadDriver(p)) return;
     int idx = m_driverCombo->findData(p);

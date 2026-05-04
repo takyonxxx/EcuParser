@@ -82,12 +82,29 @@ QStringList AppPaths::listDrivers()
     if (dir.isEmpty())
         return {};
     QDir d(dir);
-    QStringList names = d.entryList(QStringList() << QStringLiteral("*.drt"),
-                                    QDir::Files | QDir::Readable, QDir::Name);
+    // Both DRT (our reverse-engineered format) and XDF (TunerPro's
+    // open format) describe the same thing - cell addresses, dims,
+    // and axes - so list them together. Recurse into a "xdf/" subdir
+    // when present so users can keep many community-contributed XDFs
+    // alongside the small handful of DRTs.
+    const QStringList patterns {
+        QStringLiteral("*.drt"),
+        QStringLiteral("*.xdf"),
+    };
     QStringList out;
-    out.reserve(names.size());
+    QStringList names = d.entryList(patterns,
+                                    QDir::Files | QDir::Readable, QDir::Name);
     for (const QString &n : names)
         out.append(d.absoluteFilePath(n));
+
+    QDir xdfDir(dir + QStringLiteral("/xdf"));
+    if (xdfDir.exists()) {
+        QStringList xdfNames = xdfDir.entryList(
+            QStringList() << QStringLiteral("*.xdf"),
+            QDir::Files | QDir::Readable, QDir::Name);
+        for (const QString &n : xdfNames)
+            out.append(xdfDir.absoluteFilePath(n));
+    }
     return out;
 }
 

@@ -22,8 +22,9 @@ struct AxisDefinition {
     char     kind    = 'C';   // 'P', 'D', 'C'
     int      formula = 0;     // 0..11
     quint32  address = 0;     // bin offset of breakpoint table
+    QString  parameter;       // optional units/parameter name (XDF only)
 
-    bool isPresent() const { return group == 'G' && address != 0; }
+    bool isPresent() const { return (group == 'G' && address != 0) || address != 0; }
 
     // Parse from the raw field string ("G,P,0,076F0E").
     // Returns false if the field doesn't have 4 comma-separated parts.

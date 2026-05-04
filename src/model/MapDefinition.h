@@ -27,6 +27,7 @@ namespace EcuParser {
 //   [11] ?
 //   [12] ?
 struct MapDefinition {
+    QString  name;                // human-readable title (XDF), or empty (DRT)
     QString  typeCode;            // "PR", "I0", ...
     int      dimX     = 0;        // columns
     int      dimY     = 0;        // rows (1 for L*-style 1D maps)
@@ -36,13 +37,23 @@ struct MapDefinition {
     AxisDefinition axisY;
     bool     enabled  = true;
 
+    // Optional category hint set by parsers that already know the
+    // category (e.g. XdfParser uses XDF's <CATEGORY> tag, or derives it
+    // from the title). When unset (Other), category() falls back to the
+    // type-code prefix logic. DriverNames overrides win over both.
+    MapCategory categoryHint = MapCategory::Other;
+
     // Total cells per map instance.
     int cellCount() const { return dimX * dimY; }
     // Bytes consumed by one map instance.
     int byteSize() const  { return cellCount() * cellSize; }
 
-    // Category derived from typeCode prefix.
-    MapCategory category() const { return categoryForTypeCode(typeCode); }
+    // Category derived from typeCode prefix, OR from categoryHint if
+    // the parser supplied one.
+    MapCategory category() const {
+        if (categoryHint != MapCategory::Other) return categoryHint;
+        return categoryForTypeCode(typeCode);
+    }
 
     // Best-effort human description for the screenshot tree. We don't have a
     // canonical mapping yet (the .drt file doesn't carry English names), so
