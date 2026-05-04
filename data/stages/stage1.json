@@ -1,6 +1,6 @@
 {
   "name": "Stage 1",
-  "description": "Conservative tune + EGR off. ~+15-18% torque, drivability-friendly. Lifts injection, rail pressure and torque limiter at higher RPM/load only. Compatible with stock turbo and stock injectors. EGR is software-disabled by saturating the phase-of-injection map to its own factory ceiling.",
+  "description": "Conservative tune. ~+15-18% torque, drivability-friendly. Lifts injection, rail pressure and torque limiter at higher RPM/load only. Compatible with stock turbo and stock injectors.",
   "schemas": ["28F0_100"],
   "edits": [
     {
@@ -8,7 +8,7 @@
       "pct": 18,
       "row_min": 7,
       "col_min": 11,
-      "comment": "+18% main fueling at high RPM x high load (rows 7..15 x cols 11..15). Mirrors the real Stage1 reference."
+      "comment": "+18% main fueling at high RPM x high load (rows 7..15 x cols 11..15)."
     },
     {
       "map": "rail pressure",
@@ -43,11 +43,21 @@
       "row_min": 4,
       "max_value": 9000,
       "comment": "+13% torque limit ceiling at mid-to-high RPM (rows 4..15), capped at 9000."
-    },
+    }
+  ],
+  "options": [
     {
-      "map": "phase of injection",
-      "set_to_map_max": true,
-      "comment": "EGR off: setting every phase-of-injection cell to the map's own factory maximum disengages EGR closed-loop control. The ECU sees a flat reference and stops actuating the EGR valve - software-only EGR delete with no hardware blanking plate required."
+      "id": "egr_off",
+      "label": "EGR off (recommended for diesels)",
+      "description": "Software EGR delete: saturates the phase-of-injection map to its own factory ceiling. The ECU sees a flat reference and disengages EGR closed-loop control. No hardware blanking plate required. Strongly recommended for long-term engine cleanliness on diesel - prevents intake soot build-up and EGR valve sticking.",
+      "default": true,
+      "edits": [
+        {
+          "map": "phase of injection",
+          "set_to_map_max": true,
+          "comment": "Flatten phase-of-injection map to its factory maximum to disengage EGR loop."
+        }
+      ]
     }
   ]
 }

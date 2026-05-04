@@ -44,25 +44,52 @@ bool StagePackage::loadFromJson(const QString &path,
     for (const QJsonValue &v : schemas)
         out->schemas.append(v.toString());
 
+    // Helper: parse a single edit object into a StageEdit. Used both
+    // for the top-level edits[] array and for option-scoped edits[].
+    auto parseEdit = [](const QJsonObject &e, StageEdit *editOut) -> bool {
+        editOut->mapName     = e.value(QStringLiteral("map")).toString();
+        editOut->pctChange   = e.value(QStringLiteral("pct")).toDouble(0.0);
+        editOut->rowMin      = e.value(QStringLiteral("row_min")).toInt(-1);
+        editOut->rowMax      = e.value(QStringLiteral("row_max")).toInt(-1);
+        editOut->colMin      = e.value(QStringLiteral("col_min")).toInt(-1);
+        editOut->colMax      = e.value(QStringLiteral("col_max")).toInt(-1);
+        editOut->maxValue    = e.value(QStringLiteral("max_value")).toInt(-1);
+        editOut->setValue    = e.value(QStringLiteral("set_value")).toInt(-1);
+        editOut->setToMapMax = e.value(QStringLiteral("set_to_map_max")).toBool(false);
+        editOut->comment     = e.value(QStringLiteral("comment")).toString();
+        return !editOut->mapName.isEmpty();
+    };
+
     out->edits.clear();
     const QJsonArray edits = root.value(QStringLiteral("edits")).toArray();
     for (const QJsonValue &ev : edits) {
         if (!ev.isObject()) continue;
-        const QJsonObject e = ev.toObject();
         StageEdit edit;
-        edit.mapName  = e.value(QStringLiteral("map")).toString();
-        edit.pctChange = e.value(QStringLiteral("pct")).toDouble(0.0);
-        edit.rowMin   = e.value(QStringLiteral("row_min")).toInt(-1);
-        edit.rowMax   = e.value(QStringLiteral("row_max")).toInt(-1);
-        edit.colMin   = e.value(QStringLiteral("col_min")).toInt(-1);
-        edit.colMax   = e.value(QStringLiteral("col_max")).toInt(-1);
-        edit.maxValue = e.value(QStringLiteral("max_value")).toInt(-1);
-        edit.setValue = e.value(QStringLiteral("set_value")).toInt(-1);
-        edit.setToMapMax = e.value(QStringLiteral("set_to_map_max")).toBool(false);
-        edit.comment  = e.value(QStringLiteral("comment")).toString();
-        if (edit.mapName.isEmpty())
-            continue;
-        out->edits.append(edit);
+        if (parseEdit(ev.toObject(), &edit))
+            out->edits.append(edit);
+    }
+
+    out->options.clear();
+    const QJsonArray opts = root.value(QStringLiteral("options")).toArray();
+    for (const QJsonValue &ov : opts) {
+        if (!ov.isObject()) continue;
+        const QJsonObject o = ov.toObject();
+        StageOption opt;
+        opt.id          = o.value(QStringLiteral("id")).toString();
+        opt.label       = o.value(QStringLiteral("label")).toString();
+        opt.description = o.value(QStringLiteral("description")).toString();
+        opt.defaultOn   = o.value(QStringLiteral("default")).toBool(true);
+        const QJsonArray oedits = o.value(QStringLiteral("edits")).toArray();
+        for (const QJsonValue &oev : oedits) {
+            if (!oev.isObject()) continue;
+            StageEdit edit;
+            if (parseEdit(oev.toObject(), &edit))
+                opt.edits.append(edit);
+        }
+        if (opt.id.isEmpty())
+            opt.id = opt.label; // fall back to label as id
+        if (!opt.id.isEmpty())
+            out->options.append(opt);
     }
 
     if (out->name.isEmpty())

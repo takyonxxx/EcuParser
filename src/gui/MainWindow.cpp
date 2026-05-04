@@ -10,9 +10,13 @@
 #include "../core/StagePackage.h"
 
 #include <QAction>
+#include <QCheckBox>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QKeySequence>
 #include <QLabel>
@@ -21,6 +25,7 @@
 #include <QMessageBox>
 #include <QInputDialog>
 #include <QPushButton>
+#include <QSet>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTabWidget>
@@ -530,26 +535,78 @@ void MainWindow::onApplyStage()
         return;
     }
 
-    // Confirmation dialog summarises what's about to happen so the user
-    // doesn't accidentally clobber the Modified bin.
-    const QString confirmMsg = QStringLiteral(
-        "Apply '%1' to the modified bin?\n\n"
-        "%2\n\n"
-        "Source: Original (%3)\n"
-        "Target: Modified (%4)\n\n"
-        "This overwrites every cell touched by the stage. The original "
-        "bin is not changed.")
-        .arg(pkg.name)
-        .arg(pkg.description.isEmpty()
-                 ? QStringLiteral("(no description)")
-                 : pkg.description)
-        .arg(QFileInfo(m_origBinCombo->currentText()).fileName())
-        .arg(QFileInfo(m_modBinPath).fileName());
-    if (QMessageBox::question(this, QStringLiteral("Apply stage"),
-                              confirmMsg,
-                              QMessageBox::Yes | QMessageBox::No)
-        != QMessageBox::Yes)
-        return;
+    // Confirmation dialog: if the package has any options[], present
+    // them as checkboxes so the user can opt-in/out of each (e.g. EGR
+    // off). If there are no options, fall back to a plain Yes/No
+    // confirmation. This is built inline rather than as a separate
+    // class because it's small, self-contained and only used here.
+    QSet<QString> enabledOptionIds;
+    {
+        QDialog dlg(this);
+        dlg.setWindowTitle(QStringLiteral("Apply stage"));
+        auto *vlay = new QVBoxLayout(&dlg);
+
+        auto *header = new QLabel(QStringLiteral("<b>Apply '%1' to the modified bin?</b>")
+                                       .arg(pkg.name), &dlg);
+        header->setWordWrap(true);
+        vlay->addWidget(header);
+
+        if (!pkg.description.isEmpty()) {
+            auto *desc = new QLabel(pkg.description, &dlg);
+            desc->setWordWrap(true);
+            desc->setStyleSheet(QStringLiteral("color: #555; margin-bottom: 6px;"));
+            vlay->addWidget(desc);
+        }
+
+        auto *paths = new QLabel(
+            QStringLiteral("Source: Original (%1)<br>Target: Modified (%2)<br><br>"
+                           "<i>The original bin is not changed.</i>")
+                .arg(QFileInfo(m_origBinCombo->currentText()).fileName())
+                .arg(QFileInfo(m_modBinPath).fileName()),
+            &dlg);
+        paths->setWordWrap(true);
+        vlay->addWidget(paths);
+
+        // One checkbox per option, with description below
+        QList<QCheckBox*> checkBoxes;
+        if (!pkg.options.isEmpty()) {
+            auto *grp = new QGroupBox(QStringLiteral("Options"), &dlg);
+            auto *grpLay = new QVBoxLayout(grp);
+            grpLay->setSpacing(8);
+            for (const StageOption &opt : pkg.options) {
+                auto *cb = new QCheckBox(opt.label.isEmpty() ? opt.id : opt.label, grp);
+                cb->setChecked(opt.defaultOn);
+                cb->setProperty("optionId", opt.id);
+                grpLay->addWidget(cb);
+                if (!opt.description.isEmpty()) {
+                    auto *od = new QLabel(opt.description, grp);
+                    od->setWordWrap(true);
+                    od->setStyleSheet(QStringLiteral(
+                        "color: #666; font-size: 11px; margin-left: 22px;"
+                        " margin-bottom: 6px;"));
+                    grpLay->addWidget(od);
+                }
+                checkBoxes.append(cb);
+            }
+            vlay->addWidget(grp);
+        }
+
+        auto *btns = new QDialogButtonBox(
+            QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        btns->button(QDialogButtonBox::Ok)->setText(QStringLiteral("Apply"));
+        connect(btns, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(btns, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        vlay->addWidget(btns);
+
+        dlg.setMinimumWidth(480);
+        if (dlg.exec() != QDialog::Accepted)
+            return;
+
+        for (QCheckBox *cb : checkBoxes) {
+            if (cb->isChecked())
+                enabledOptionIds.insert(cb->property("optionId").toString());
+        }
+    }
 
     // First reset Modified to a copy of Original so re-applying a stage
     // is idempotent (otherwise applying Stage1 then Stage2 would
@@ -561,16 +618,37 @@ void MainWindow::onApplyStage()
         return;
     }
 
+    // Build the effective stage: core edits plus the edits of any
+    // option the user kept checked. We mutate a local copy so the
+    // on-disk JSON is untouched.
+    StagePackage effective = pkg;
+    for (const StageOption &opt : pkg.options) {
+        if (enabledOptionIds.contains(opt.id))
+            effective.edits.append(opt.edits);
+    }
+    effective.options.clear(); // already merged
+
     QStringList warnings;
-    const int written = applyStage(pkg, *m_driver, *m_origBin,
+    const int written = applyStage(effective, *m_driver, *m_origBin,
                                    m_modBin.get(), &warnings);
     m_modDirty = (written > 0);
     refreshTitle();
     refreshCurrentMap();
     m_tree->refreshDiffHighlights();
 
+    // Build a small summary for the user: which options got applied,
+    // how many cells were written. Useful for confirming "yes, EGR
+    // off was indeed included" after the fact.
+    QStringList appliedOpts;
+    for (const StageOption &opt : pkg.options) {
+        if (enabledOptionIds.contains(opt.id))
+            appliedOpts.append(opt.label.isEmpty() ? opt.id : opt.label);
+    }
     QString summary = QStringLiteral("'%1' applied: %2 cells written.")
                           .arg(pkg.name).arg(written);
+    if (!appliedOpts.isEmpty())
+        summary += QStringLiteral("\n\nOptions enabled:\n  - ")
+                   + appliedOpts.join(QStringLiteral("\n  - "));
     if (!warnings.isEmpty())
         summary += QStringLiteral("\n\nWarnings:\n  - ")
                    + warnings.join(QStringLiteral("\n  - "));

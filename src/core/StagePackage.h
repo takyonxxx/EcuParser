@@ -69,14 +69,29 @@ struct StageEdit
     QString comment;     // free-form comment for human reading
 };
 
+// A togglable bundle of edits inside a stage. The user gets a checkbox
+// in the Apply Stage dialog for each option; checked options have their
+// edits appended to the main edit list at apply time. Use this for
+// switches like "EGR off" that the user might or might not want to take
+// alongside the core tune.
+struct StageOption
+{
+    QString          id;            // stable identifier (used for "remember last choice")
+    QString          label;         // short text for the checkbox
+    QString          description;   // long explanation shown alongside
+    bool             defaultOn = true;
+    QList<StageEdit> edits;         // edits applied when this option is on
+};
+
 // A stage package: a list of edits plus metadata. Schemas the package
 // is valid for.
 struct StagePackage
 {
-    QString          name;          // user-visible display name
-    QString          description;
-    QStringList      schemas;       // schemaId list this stage applies to
-    QList<StageEdit> edits;
+    QString            name;          // user-visible display name
+    QString            description;
+    QStringList        schemas;       // schemaId list this stage applies to
+    QList<StageEdit>   edits;         // core edits, always applied
+    QList<StageOption> options;       // optional togglable bundles
 
     // Load a stage from a JSON file on disk. Returns false and fills
     // *errorOut on failure (file missing, JSON syntax, missing fields).
