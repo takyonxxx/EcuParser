@@ -1,16 +1,19 @@
 # EcuParser - Qt 6 / C++ GUI
 
-ECM Titanium .drt driver dosyalarını parse eden ve EDC15C bin'lerini ikili
-karşılaştırma modunda görselleştiren Qt 6 uygulaması.
+A Qt 6 application that parses `.drt` driver files and visualises
+EDC15C bin files in side-by-side comparison mode. Load an original
+(stock) bin and a modified (tune) bin together, browse every map
+defined by the driver as either a table or a graph, edit cells, and
+export the modified bin back to disk.
 
-## Desteklenen Driver: J293_822 (Jeep WJ 2.7 CRD, EDC15C, schema 28F0_100)
+## Supported driver: J293_822 (Jeep WJ 2.7 CRD, EDC15C, schema 28F0_100)
 
-ECM Titanium 1.61 ile birebir karşılaştırılarak doğrulanmış 11 harita.
-Adresler ve boyutlar `src/model/DriverNames.cpp` içinde sabit kodlu —
-DRT dosyasındaki dim alanları bazı haritalar için yanlış olduğundan
-override edilmiştir.
+Eleven maps reverse-engineered and verified against a real Stage1
+file. The addresses and dimensions are hard-coded in
+`src/model/DriverNames.cpp` because the dim fields in the `.drt` are
+unreliable for some maps and need to be overridden.
 
-| #  | Harita adı                                          | Adres     | Boyut  |
+| #  | Map name                                            | Address   | Size   |
 |----|-----------------------------------------------------|-----------|--------|
 | 1  | injection at part throttle                          | 0x076F52  | 16x16  |
 | 2  | rail pressure                                       | 0x07ADD2  | 16x16  |
@@ -24,119 +27,115 @@ override edilmiştir.
 | 10 | turbo pressure                                      | 0x075EA0  | 12x12  |
 | 11 | torque limiter                                      | 0x076D82  | 19x1   |
 
-5 ve 6 numaralı haritalar DRT'de 2 instance'lı listeleniyor (ikinci
-adresler `0x078F2A` ve `0x0794CA`), ancak ECM Titanium yalnızca ilkini
-gösteriyor. Biz de aynı davranışı `maxInstances=1` ile koruyoruz.
+Maps 5 and 6 (Boost x RPM) are listed in the `.drt` with two
+instances each (the second addresses are `0x078F2A` and `0x0794CA`),
+but the canonical reference behaviour shows only the first. We
+preserve that with `maxInstances=1`.
 
-11 numaralı torque limiter DRT'de "?" type code ile boş `name` ve
-`0x0` boyut alanlarıyla kayıtlı — DriverNames'taki override `19x1`
-boyutuyla doğru görüntülenmesini sağlıyor.
+Map 11 (torque limiter) is recorded in the `.drt` with a "?" type
+code, an empty `name`, and `0x0` dimensions; the override in
+DriverNames sets it to `19x1` so it displays correctly.
 
-5 adet 16-satırlı harita (rail pressure + (Map 1/2) + iki Boost x RPM
-varyantı) **aynı RPM eksenini paylaşıyor** ve bu eksen bin'de yok,
-driver içine gömülü:
+The five 16-row maps (rail pressure plus Map 1/2 plus the two
+Boost x RPM variants) **share the same RPM axis**, which is not
+stored in the bin but embedded in the driver:
 
 ```
 700, 800, 900, 1000, 1100, 1300, 1500, 1700,
 1900, 2100, 2400, 2700, 3100, 3500, 4000, 4500
 ```
 
-DriverNames bu RPM ekseni değerlerini hardcoded tutuyor (rail
-pressure'ı ECM Titanium ekran görüntüsünden alındı, diğer 4 harita
-aynı eksen olarak doğrulandı).
+DriverNames keeps these RPM axis values hard-coded.
 
-## Decode kuralları (doğrulanmış)
+## Decode rules (verified)
 
-- **Cell endianness: little-endian** (BE değil) - 0x076F52 adresinde
-  `0x10 0x0E` = 3600 LE, ECM ile eşleşiyor
+- **Cell endianness: little-endian** - at 0x076F52 the bytes
+  `0x10 0x0E` decode to 3600 LE
 - **Cell layout: idx = axisX_row * dimY + axisY_col** (row-major,
-  RPM = dış indeks, Load = iç indeks)
-- **Axis breakpoints da LE** olarak okunur
-- **Cell size: 2 byte (u16)**, 0..65535 aralığında
-- **DRT dim alanları her zaman güvenilir değil** — DriverNames
-  override'ı dim ve eksen değerlerini per-map sabitleyebiliyor
+  RPM = outer index, Load = inner index)
+- **Axis breakpoints are LE** as well
+- **Cell size: 2 bytes (u16)**, range 0..65535
+- **DRT dim fields are not always reliable** - DriverNames overrides
+  pin the dim and axis values per map
 
-## Görünüm (ECM Titanium uyumlu)
+## Look and feel
 
-- **Sidebar (dark)**: ECM tree sırası ve isimleri (J293_822 için)
-- **Tablo (light)**: açık zemin, mavi başlıklar, sadece değişen hücreler
-  vurgulu (yeşil=artış, pembe=azalış)
-- **Grafik (cyan zemin)**: Image 3 tarzı ince mavi/kırmızı çizgi, 2 taraflı
-  Y ekseni, "Original = Modified" uyarısı
+- **Tree sidebar (dark)**: Maps grouped by category (INJECTION / TURBO
+  / LIMITERS / OTHER), sorted by canonical per-driver order.
+- **Table (light theme)**: White/light background, blue header text;
+  only **changed** cells are tinted (green = increase, pink = decrease)
+  with an orig->mod delta in the tooltip.
+- **Graph (cyan background)**: 1 px blue line (Original) and 1 px red
+  line (Modified), Y axis 0..65535 (full u16) on both sides, hex
+  address labels on the X axis.
+- **Cursor crosshair**: Hovering over the graph snaps the crosshair to
+  the nearest cell and shows a cream tooltip with **RPM / Load /
+  address / Ori / Mod (delta)**.
 
-## Özellikler
+## Features
 
-**Dosya yönetimi**
-- Driver, Original, Modified bin combo'ları (data/ klasöründen otomatik
-  doldurulur, başlangıçta hiçbir şey yüklenmez)
-- "..." browse butonları ile data/ dışındaki dosyaları seçme
-- Original seçildiğinde Modified de aynı dosyaya **otomatik kopyalanır**
-  (ECM "Driver" workflow'u) — kullanıcı isterse Modified'ı sonradan
-  başka bir bin'e değiştirir
-- **Export modified...**: Modified bin'i `<orig>_modified.bin` default
-  ismiyle diske kaydeder, Original'i bozmaz
+**File handling**
 
-**Düzenleme**
-- Hücreye çift tıklayarak doğrudan değer girme (LE u16 olarak yazılır)
-- Tabloda alan seç → **sağ tık → Set value...** → tüm seçili hücrelere
-  tek değer yazma (bulk edit)
-- **Copy ORI → MOD**: seçili haritanın orijinal değerlerini Modified'a
-  geri yükle (yanlış yapılan edit'i geri alma)
+- Driver / Original / Modified bin combos populated from `data/`,
+  nothing loaded at startup.
+- "..." browse buttons let you pick files outside `data/`.
+- Selecting an Original auto-mirrors the Modified slot to the same
+  file (a copy of the bin in memory; edits to Modified never alter
+  Original). You can swap Modified to a different bin afterwards.
+- **Export modified...** suggests `<orig>_modified.bin` as the default
+  filename so you don't overwrite the original on disk.
 
-**Görselleştirme**
-- **Tablo**: Light ECM teması, sadece **değişen** hücreler vurgulu
-  (yeşil=artış, pembe=azalış), tooltip'te orig→mod delta
-- **Grafik**: Cyan zemin, mavi (Original) ve kırmızı (Modified) çizgi,
-  iki taraflı Y ekseni 0..65535, X ekseninde **hex adres** etiketleri
-- **Mouse cursor crosshair**: Grafik üzerinde mouse hareketinde en yakın
-  hücreyi snap eder, cream renkli tooltip'te **RPM / Load / Adres / Ori
-  / Mod (delta)** gösterir
+**Editing**
 
-## Yapı
+- Double-click a cell to edit its value (written back as LE u16).
+- Select a region in the table, **right-click -> Set value...** to
+  write a single value into every selected cell at once (bulk edit).
+- **Copy ORI -> MOD** restores the selected map's original values
+  into the modified bin.
+
+## Project layout
 
 ```
 src/core/   DrtParser, BinFile (LE/BE read+write), MapData (LE row-major)
 src/model/  DriverModel, MapDefinition, AxisDefinition, MapCategory,
-            DriverNames (ECM canonical name table per driver)
-src/gui/    MainWindow, DriverTreeWidget, MapTableWidget (light ECM style),
-            MapGraphWidget (cyan ECM style), AppPaths
-data/       J293_822.drt + bin'ler
+            DriverNames (canonical name + override table)
+src/gui/    MainWindow, DriverTreeWidget, MapTableWidget,
+            MapGraphWidget, AppPaths
+data/       J293_822.drt + sample bins
 ```
 
-## Derleme
+## Building
 
-`build.sh` script'i proje klasörünü temiz tutar — build çıktıları proje
-**dışında**, kardeş `EcuParser-build/` klasörüne yazılır. Pro dosyası
-release ve debug çıktılarını ayrı alt klasörlere yönlendirir, böylece
-iki konfigürasyon yan yana durabilir:
+`build.sh` keeps the project directory clean by writing build output
+into a sibling `EcuParser-build/` directory. The .pro file routes
+release and debug artefacts into separate sub-directories so both
+configurations can co-exist:
 
 ```bash
 ./build.sh                              # release build
 ```
 
-Sonra çalıştır (proje dizinine cd lazım çünkü `data/` klasörünü oradan
-arar):
+Run it from the project directory (so it can find `data/`):
 
 ```bash
 cd EcuParser
 ../EcuParser-build/release/EcuParser
 ```
 
-**Qt Creator** ile çalışıyorsanız: pro dosyası release ve debug
-çıktılarını otomatik olarak doğru alt klasörlere koyuyor. Build
-directory ayarınızda örneğin `build-EcuParser/` görünüyorsa, exe'ler
-şöyle yerleşir:
+**Qt Creator** users: the .pro file routes per-configuration output
+into the right sub-directories automatically. With a build directory
+of e.g. `build-EcuParser/`, the binaries land here:
 
 ```
 build-EcuParser/
-├── Makefile, Makefile.Debug, Makefile.Release
-├── debug/EcuParser(.exe)        ← Debug build çıktısı
-│   └── .obj, .moc, ...
-└── release/EcuParser(.exe)      ← Release build çıktısı
-    └── .obj, .moc, ...
+|-- Makefile, Makefile.Debug, Makefile.Release
+|-- debug/EcuParser(.exe)        <- Debug build output
+|   `-- .obj, .moc, ...
+`-- release/EcuParser(.exe)      <- Release build output
+    `-- .obj, .moc, ...
 ```
 
-**Manuel out-of-source** isterseniz:
+**Manual out-of-source** build:
 
 ```bash
 mkdir -p ../EcuParser-build && cd ../EcuParser-build
@@ -145,16 +144,17 @@ make -j4
 # Binary: ./release/EcuParser
 ```
 
-In-source build (proje içinde `qmake6 EcuParser.pro && make`) hala
-çalışır ama proje klasörünü kirletir, out-of-source tavsiye edilir.
+In-source builds (`qmake6 EcuParser.pro && make` from the project
+root) still work but pollute the source tree; out-of-source is
+recommended.
 
-## Bilinen sınırlar
+## Known limits
 
-- Bazı haritaların DRT dim ve eksen bilgisi yanlış (driver içine gömülü) -
-  DriverNames sınıfında her harita için override edilebilir
-
-- Bazı haritaların eksen breakpoint sayısı dim'den farklı (son birkaç
-  satır/sütun anlamsız değer gösterebilir)
-- Cell değerleri raw u16 LE — fiziksel birime dönüşüm yok (örn. tork byte
-  -> Nm, basınç byte -> mbar)
-- Sadece u16 hücre yazımı destekleniyor
+- Some maps have unreliable DRT dim or axis info because the real
+  values are embedded in the driver. DriverNames lets you override
+  them per map.
+- Some maps have axis breakpoint counts that differ from their
+  declared dim, so the trailing rows or columns may be meaningless.
+- Cell values are raw u16 LE - there is no conversion into physical
+  units (e.g. torque -> Nm, pressure -> mbar).
+- Only u16 cell writes are supported.

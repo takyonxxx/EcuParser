@@ -5,7 +5,7 @@
 #include <QDebug>
 #include <QStringList>
 
-namespace Titanium {
+namespace EcuParser {
 
 namespace {
 
@@ -227,4 +227,4 @@ std::optional<DriverModel> DrtParser::parseBytes(const QByteArray &bytes, QStrin
     return model;
 }
 
-} // namespace Titanium
+} // namespace EcuParser

@@ -8,7 +8,7 @@
 #include <QList>
 #include <cstdint>
 
-namespace Titanium {
+namespace EcuParser {
 
 // One map descriptor as stored in a .drt record.
 //
@@ -50,6 +50,6 @@ struct MapDefinition {
     QString displayName() const;
 };
 
-} // namespace Titanium
+} // namespace EcuParser
 
 #endif // MAPDEFINITION_H

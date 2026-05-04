@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <numeric>
 
-namespace Titanium {
+namespace EcuParser {
 
 qint32 MapData::minValue() const
 {
@@ -60,7 +60,7 @@ MapData readMapInstance(const BinFile &bin,
                 break;
             case 2:
                 // EDC15C cells are little-endian. Verified against
-                // J293_822 + 293-822.bin against ECM Titanium.
+                // J293_822 + 293-822.bin against the reference tool.
                 v = bin.readU16LE(off);
                 break;
             case 4:
@@ -76,4 +76,4 @@ MapData readMapInstance(const BinFile &bin,
     return data;
 }
 
-} // namespace Titanium
+} // namespace EcuParser

@@ -2,13 +2,13 @@
 
 #include <QHash>
 
-namespace Titanium {
+namespace EcuParser {
 
 namespace {
 
 // Composite key uses just (schemaId, primary address). dimX/dimY in the
 // .drt are not always trustworthy (see e.g. 0x07ADD2 which DRT says is
-// 16x20 but ECM Titanium displays as 16x16) so we don't include them in
+// 16x20 but the reference tool displays as 16x16) so we don't include them in
 // the key.
 struct MapKey {
     QString schema;
@@ -26,7 +26,7 @@ size_t qHash(const MapKey &k, size_t seed = 0) noexcept
 
 struct NameEntry {
     QString name;
-    int     order;        // ECM tree order
+    int     order;        // the reference tool tree order
     int     dimXOverride; // 0 = use map.dimX
     int     dimYOverride; // 0 = use map.dimY
     QList<int> axisXOverride;  // empty = no override
@@ -34,17 +34,17 @@ struct NameEntry {
     MapCategory category {MapCategory::Other};
     // Maximum instances to expose. 0 = no limit (show all addresses
     // listed in MapDefinition::addresses). >=1 = clamp to that many.
-    // ECM Titanium sometimes only displays the first address even when
+    // the reference tool sometimes only displays the first address even when
     // the .drt lists multiple, e.g. J293_822's "(Boost x RPM)" maps -
-    // the .drt has 2 addresses each but ECM only shows the first.
+    // the .drt has 2 addresses each but the reference tool only shows the first.
     int     maxInstances {0};
 };
 
 // Build the override table once. Address + name + dimensions catalogued
-// directly from ECM Titanium 1.61 (J293_822 driver) by the user. The list
+// directly from the reference tool 1.61 (J293_822 driver) by the user. The list
 // below is the authoritative source; the .drt file's own dim hints are
-// often wrong (e.g. 0x71F52 says 12x10 but ECM renders 12x16, and 0x7753E
-// says 10x10 but ECM renders 12x10).
+// often wrong (e.g. 0x71F52 says 12x10 but the reference tool renders 12x16, and 0x7753E
+// says 10x10 but the reference tool renders 12x10).
 //
 // dimXOverride / dimYOverride are populated even when they happen to match
 // the .drt: this future-proofs against accidental DRT churn and documents
@@ -56,8 +56,8 @@ const QHash<MapKey, NameEntry> &table()
         const QString s28 = QStringLiteral("28F0_100");
 
         // Five 16-row injection maps share the same hand-picked RPM axis
-        // in ECM Titanium - it's embedded in the driver, not in the bin.
-        // We hard-code the values from ECM Image 1 for all five:
+        // in the reference tool - it's embedded in the driver, not in the bin.
+        // We hard-code the values from the reference tool Image 1 for all five:
         //   0x07ADD2 (rail pressure)
         //   0x072CF0 (Map 1)
         //   0x072FC0 (Map 2)
@@ -94,8 +94,8 @@ const QHash<MapKey, NameEntry> &table()
                  {QStringLiteral("injection at part throttle (Map 2)"), 4, 16, 20,
                   sharedInjectionRpm, {}, MapCategory::Injection});
 
-        // (Map 1) (Boost x RPM): the .drt lists 2 addresses but ECM
-        // Titanium only displays the first - we honour that by clamping
+        // (Map 1) (Boost x RPM): the .drt lists 2 addresses but the reference tool
+        // reference only displays the first - we honour that by clamping
         // maxInstances to 1. The address at 0x78F2A is still in the .drt
         // file and bin so a future "expert mode" could expose it.
         m.insert({s28, 0x078C5A},
@@ -214,4 +214,4 @@ int DriverNames::maxInstances(const QString &schemaId, const MapDefinition &map)
     return 0;
 }
 
-} // namespace Titanium
+} // namespace EcuParser

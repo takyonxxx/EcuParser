@@ -6,12 +6,12 @@
 #include <QVector>
 #include <cstdint>
 
-namespace Titanium {
+namespace EcuParser {
 
 class BinFile;
 
 // Pulls a 2D grid of cells out of a BinFile using a MapDefinition. One map
-// definition can have multiple addresses (Titanium replicates a single map
+// definition can have multiple addresses (reference replicates a single map
 // at several offsets); MapData represents one instance at one address.
 struct MapData {
     int rows  = 0;        // == def.dimY
@@ -39,6 +39,6 @@ MapData readMapInstance(const BinFile &bin,
                         int dimXOverride = 0,
                         int dimYOverride = 0);
 
-} // namespace Titanium
+} // namespace EcuParser
 
 #endif // MAPDATA_H

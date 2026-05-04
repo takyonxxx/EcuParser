@@ -7,9 +7,9 @@
 #include <QByteArray>
 #include <optional>
 
-namespace Titanium {
+namespace EcuParser {
 
-// Parses ECM Titanium .drt driver files.
+// Parses the reference tool .drt driver files.
 //
 // The format is ASCII-only, byte-delimited:
 //   0x84 - record separator
@@ -36,6 +36,6 @@ public:
     static constexpr char kFieldSep  = '\xBB';
 };
 
-} // namespace Titanium
+} // namespace EcuParser
 
 #endif // DRTPARSER_H

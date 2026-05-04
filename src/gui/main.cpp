@@ -165,7 +165,7 @@ int main(int argc, char *argv[])
     QApplication::setPalette(makeDarkPalette());
     qApp->setStyleSheet(QString::fromLatin1(kDarkStylesheet));
 
-    Titanium::MainWindow w;
+    EcuParser::MainWindow w;
     w.show();
     return app.exec();
 }

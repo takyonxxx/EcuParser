@@ -8,11 +8,11 @@
 
 class QLabel;
 
-namespace Titanium {
+namespace EcuParser {
 
 class BinFile;
 
-// Dual-bin map compare table. Mirrors the orientation used by ECM Titanium's
+// Dual-bin map compare table. Mirrors the orientation used by the reference tool's
 // "Edit map" window (Image 2 in the spec):
 //
 //   +----------+-----+-----+-----+-----+-----+
@@ -26,7 +26,7 @@ class BinFile;
 //   (rows = RPM = X axis breakpoints from bin)
 //   (cols = Load %, implicit 0..100/dimY-1 when no Y axis address)
 //
-// In a normal Bosch driver dimX is RPM (rows in Titanium's display) and
+// In a normal Bosch driver dimX is RPM (rows in reference's display) and
 // dimY is load (columns). The breakpoint table addresses are stored in the
 // .drt file under axisX / axisY respectively.
 class MapTableWidget : public QWidget
@@ -38,7 +38,7 @@ public:
     // Show map values from up to two bins. The widget renders the modified
     // bin as the primary value and uses cell colouring to indicate
     // differences from the original. Either pointer may be null. schemaId
-    // is used to look up the ECM Titanium canonical name for the title.
+    // is used to look up the the reference tool canonical name for the title.
     void showMap(const BinFile *originalBin,
                  const BinFile *modifiedBin,
                  const QString &schemaId,
@@ -80,7 +80,7 @@ private:
                               int count) const;
 
     // Synthesise a Load % axis when the map has no Y axis breakpoint table.
-    // Matches the values Titanium puts above injection-at-part-throttle:
+    // Matches the values reference puts above injection-at-part-throttle:
     // for dim=16 -> 6, 13, 19, 25, 31, 38, 44, 50, 56, 63, 69, 75, 81, 88,
     // 94, 100. Formula:  ceil( (i+1) * 100 / dim )
     static QList<int> synthesizeLoadAxis(int count);
@@ -98,6 +98,6 @@ private:
     bool m_suppressEdits = false;
 };
 
-} // namespace Titanium
+} // namespace EcuParser
 
 #endif // MAPTABLEWIDGET_H

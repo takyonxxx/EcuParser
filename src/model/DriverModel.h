@@ -6,7 +6,7 @@
 #include <QString>
 #include <QList>
 
-namespace Titanium {
+namespace EcuParser {
 
 // Parsed content of a .drt driver file.
 //
@@ -33,11 +33,11 @@ struct DriverModel {
 
     bool isValid() const { return !schemaId.isEmpty() && !maps.isEmpty(); }
 
-    // Group maps by category for tree display (matches ECM Titanium UI).
+    // Group maps by category for tree display (matches the reference tool UI).
     // Returns categories in a stable order: INJECTION, TURBO, LIMITERS, TIMING, OTHER.
     QList<QPair<MapCategory, QList<const MapDefinition*>>> mapsByCategory() const;
 };
 
-} // namespace Titanium
+} // namespace EcuParser
 
 #endif // DRIVERMODEL_H

@@ -5,7 +5,7 @@
 #include <QByteArray>
 #include <cstdint>
 
-namespace Titanium {
+namespace EcuParser {
 
 // Loads an ECU bin into memory and exposes typed reads.
 //
@@ -55,6 +55,6 @@ private:
     bool checkRange(quint32 offset, qsizetype length, bool *ok) const;
 };
 
-} // namespace Titanium
+} // namespace EcuParser
 
 #endif // BINFILE_H

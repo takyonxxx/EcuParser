@@ -5,9 +5,9 @@
 
 #include <QTreeWidget>
 
-namespace Titanium {
+namespace EcuParser {
 
-// Tree view of a driver's maps grouped by category, mirroring ECM Titanium's
+// Tree view of a driver's maps grouped by category, mirroring the reference tool's
 // "Available maps" pane on the right side of the main window.
 //
 // Emits mapSelected() with a pointer into the held DriverModel; the caller
@@ -46,6 +46,6 @@ private:
     };
 };
 
-} // namespace Titanium
+} // namespace EcuParser
 
 #endif // DRIVERTREEWIDGET_H

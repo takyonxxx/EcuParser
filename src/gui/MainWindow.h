@@ -13,7 +13,7 @@ class QTabWidget;
 class QPushButton;
 class QAction;
 
-namespace Titanium {
+namespace EcuParser {
 
 class DriverTreeWidget;
 class MapTableWidget;
@@ -98,6 +98,6 @@ private:
     bool m_bulkEditInProgress = false;
 };
 
-} // namespace Titanium
+} // namespace EcuParser
 
 #endif // MAINWINDOW_H

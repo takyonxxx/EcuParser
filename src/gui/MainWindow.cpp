@@ -23,7 +23,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
-namespace Titanium {
+namespace EcuParser {
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -141,7 +141,7 @@ void MainWindow::populateDataCombos()
     // Each combo starts with a "(none)" placeholder so the user begins
     // with nothing loaded - they pick a driver, then an Original bin,
     // and at that point Modified is auto-mirrored to the same path
-    // (matching ECM Titanium's "Driver" workflow). Subsequent edits go
+    // (matching the reference tool's "Driver" workflow). Subsequent edits go
     // into Modified; saving exports a renamed copy.
     auto fillBinCombo = [](QComboBox *cb, const QStringList &paths) {
         cb->blockSignals(true);
@@ -183,7 +183,7 @@ void MainWindow::onOriginalBinComboChanged(int index)
     if (!loadOriginalBin(p))
         return;
 
-    // ECM Titanium-style "Driver" workflow: when Original is loaded and
+    // the reference tool-style "Driver" workflow: when Original is loaded and
     // Modified is currently empty, auto-mirror Modified to the same
     // file. The two BinFile instances are SEPARATE in memory so edits
     // to Modified don't bleed into Original. The user can swap Modified
@@ -551,4 +551,4 @@ void MainWindow::refreshTitle()
     setWindowTitle(t);
 }
 
-} // namespace Titanium
+} // namespace EcuParser

@@ -6,7 +6,7 @@
 #include <QStringList>
 #include <QMap>
 
-namespace Titanium {
+namespace EcuParser {
 
 // ============================================================
 // AxisDefinition::parse
@@ -79,7 +79,7 @@ QString MapDefinition::displayName() const
 // ============================================================
 QList<QPair<MapCategory, QList<const MapDefinition*>>> DriverModel::mapsByCategory() const
 {
-    // Stable display order matching ECM Titanium UI.
+    // Stable display order matching the reference tool UI.
     static const QList<MapCategory> order {
         MapCategory::Injection,
         MapCategory::Turbo,
@@ -109,7 +109,7 @@ MapCategory categoryForTypeCode(const QString &typeCode)
     if (typeCode.isEmpty())
         return MapCategory::Other;
 
-    // PR is rail pressure, lives under INJECTION in ECM Titanium UI
+    // PR is rail pressure, lives under INJECTION in the reference tool UI
     if (typeCode == QStringLiteral("PR"))
         return MapCategory::Injection;
 
@@ -144,4 +144,4 @@ QString categoryDisplayName(MapCategory cat)
     return QStringLiteral("OTHER");
 }
 
-} // namespace Titanium
+} // namespace EcuParser

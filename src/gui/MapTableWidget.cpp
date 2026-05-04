@@ -16,19 +16,19 @@
 #include <QVBoxLayout>
 #include <algorithm>
 
-namespace Titanium {
+namespace EcuParser {
 
-// Colours chosen to mirror ECM Titanium's "Edit map" window:
+// Colours chosen to mirror the reference tool's "Edit map" window:
 //   - light grey/white cell background
 //   - blue header text on a slightly darker header band (we use the
 //     stylesheet for the header band itself)
 //   - black cell text
-//   - changed cells get a light green tint exactly like ECM marks edits.
-namespace ecm {
+//   - changed cells get a light green tint exactly like the reference tool marks edits.
+namespace palette {
     const QColor kCellBg          (245, 246, 248);
     const QColor kCellAlt         (236, 238, 242);
     const QColor kCellText        ( 25,  30,  40);
-    const QColor kChangedBg       (170, 230, 170);   // ECM-edit-green
+    const QColor kChangedBg       (170, 230, 170);   // the reference tool-edit-green
     const QColor kChangedText     ( 10,  60,  20);
     const QColor kIncreasedTint   (210, 240, 210);   // mod > orig
     const QColor kDecreasedTint   (240, 215, 210);   // mod < orig (light pinky)
@@ -74,7 +74,7 @@ MapTableWidget::MapTableWidget(QWidget *parent)
     // Custom context menu so the user can right-click a selection and
     // set every selected cell to one value at once. This is the standard
     // workflow for raising/lowering a whole region of a fuel or boost
-    // map, and ECM Titanium has the equivalent feature under "Manual
+    // map, and the reference tool has the equivalent feature under "Manual
     // change > Set value".
     m_table->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_table, &QTableWidget::customContextMenuRequested,
@@ -108,7 +108,7 @@ QList<int> MapTableWidget::synthesizeLoadAxis(int count)
         return out;
     out.reserve(count);
     for (int i = 0; i < count; ++i) {
-        // (i+1) * 100 / count, rounded - reproduces Titanium's Load header
+        // (i+1) * 100 / count, rounded - reproduces reference's Load header
         // for dim=16: 6, 13, 19, 25, 31, 38, 44, 50, 56, 63, 69, 75, 81,
         // 88, 94, 100.
         out.append(int((double(i + 1) * 100.0 / double(count)) + 0.5));
@@ -118,10 +118,10 @@ QList<int> MapTableWidget::synthesizeLoadAxis(int count)
 
 QColor MapTableWidget::heatColour(int /*value*/, int /*lo*/, int /*hi*/)
 {
-    // Heatmap mode is no longer used in the ECM-style display. We keep the
+    // Heatmap mode is no longer used in the the reference tool-style display. We keep the
     // function as a stub so the header signature stays stable and old call
     // sites (none currently) still compile if reintroduced.
-    return ecm::kCellBg;
+    return palette::kCellBg;
 }
 
 void MapTableWidget::clearMap()
@@ -173,7 +173,7 @@ void MapTableWidget::showMap(const BinFile *originalBin,
     const BinFile *primary = modifiedBin ? modifiedBin : originalBin;
 
     // Effective instance count: clamp to maxInstances when set so the
-    // title matches the tree (ECM hides extra instances we still parse).
+    // title matches the tree (the reference tool hides extra instances we still parse).
     int effInstances = map->addresses.size();
     {
         const int cap = DriverNames::maxInstances(schemaId, *map);
@@ -210,11 +210,11 @@ void MapTableWidget::showMap(const BinFile *originalBin,
         return;
     }
 
-    // === Layout (Titanium orientation):
+    // === Layout (reference orientation):
     //   rows    = effective dimX  (axisX, RPM)
     //   columns = effective dimY  (axisY, Load)
     // For some maps the .drt dimensions are wrong - e.g. 0x07ADD2 reports
-    // 16x20 but the actual bin stride and ECM display are both 16x16, the
+    // 16x20 but the actual bin stride and the reference tool display are both 16x16, the
     // trailing 4 cells per row in the .drt's 20-wide reading are noise.
     // DriverNames provides per-driver overrides we honour for BOTH the
     // visible grid AND the bin stride (i.e. the override is the truth).
@@ -222,7 +222,7 @@ void MapTableWidget::showMap(const BinFile *originalBin,
     const int colCount = effDimY;
     const int binStride = colCount;  // The override dim IS the true stride.
 
-    // Hard-coded axis overrides take precedence (used when ECM Titanium
+    // Hard-coded axis overrides take precedence (used when the reference tool
     // embeds the axis in the driver itself rather than the bin). Then we
     // fall back to bin reads, then synthesised Load%.
     QList<int> rowAxis = DriverNames::axisXOverride(schemaId, *map);
@@ -251,7 +251,7 @@ void MapTableWidget::showMap(const BinFile *originalBin,
     rowHeaders.reserve(rowCount);
     for (int r = 0; r < rowCount; ++r) {
         // If we have a real or override RPM axis, use it. Otherwise show
-        // a plain row index (no "R" prefix - matches ECM Titanium's style
+        // a plain row index (no "R" prefix - matches the reference tool's style
         // of just showing breakpoint numbers when present, blank-ish
         // when not).
         rowHeaders.append(r < rowAxis.size()
@@ -264,7 +264,7 @@ void MapTableWidget::showMap(const BinFile *originalBin,
     // maps that only show small numbers (0..15) in the row header.
     m_table->verticalHeader()->setMinimumWidth(70);
 
-    // Corner label: ECM Titanium puts an axis hint in the top-left
+    // Corner label: the reference tool puts an axis hint in the top-left
     // corner of every map editor. For 2D maps we show "RPM / Load"; for
     // 1D maps (colCount == 1, e.g. torque limiter) only "RPM" makes sense.
     // We re-create the label every showMap to keep the text in sync.
@@ -301,7 +301,7 @@ void MapTableWidget::showMap(const BinFile *originalBin,
                 this, reposCorner);
     }
 
-    // === Fill cells - ECM style: light background, only diffs are tinted.
+    // === Fill cells - the reference tool style: light background, only diffs are tinted.
     int diffCount = 0;
     for (int r = 0; r < rowCount; ++r) {
         for (int c = 0; c < colCount; ++c) {
@@ -318,8 +318,8 @@ void MapTableWidget::showMap(const BinFile *originalBin,
             item->setTextAlignment(Qt::AlignCenter);
             item->setData(Qt::UserRole, idx);
 
-            QColor bg = (r % 2) ? ecm::kCellAlt : ecm::kCellBg;
-            QColor fg = ecm::kCellText;
+            QColor bg = (r % 2) ? palette::kCellAlt : palette::kCellBg;
+            QColor fg = palette::kCellText;
             bool differs = false;
 
             if (!origData.cells.isEmpty()) {
@@ -327,8 +327,8 @@ void MapTableWidget::showMap(const BinFile *originalBin,
                 if (ov != v) {
                     differs = true;
                     ++diffCount;
-                    bg = (v > ov) ? ecm::kIncreasedTint : ecm::kDecreasedTint;
-                    fg = ecm::kChangedText;
+                    bg = (v > ov) ? palette::kIncreasedTint : palette::kDecreasedTint;
+                    fg = palette::kChangedText;
                     item->setToolTip(
                         QStringLiteral("Original: %1\nModified: %2\nDelta: %3")
                             .arg(ov).arg(v).arg(qint64(v) - qint64(ov)));
@@ -492,4 +492,4 @@ void MapTableWidget::onTableContextMenu(const QPoint &pos)
     emit bulkEditEnd();
 }
 
-} // namespace Titanium
+} // namespace EcuParser

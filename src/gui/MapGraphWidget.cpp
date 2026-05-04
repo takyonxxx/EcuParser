@@ -11,25 +11,25 @@
 #include <QPaintEvent>
 #include <algorithm>
 
-namespace Titanium {
+namespace EcuParser {
 
-// ECM Titanium graph colours (Image 3 from the spec):
+// the reference tool graph colours (Image 3 from the spec):
 //   - light cyan plot background (#a5dde9-ish)
 //   - dotted dark grey grid
 //   - thin solid blue line for Original
 //   - thin solid red line for Modified (drawn ON TOP of original so any
-//     unchanged stretches show purple-ish overlap; this is what ECM does)
-namespace ecm_g {
-    const QColor kBg            (165, 221, 233);   // ECM cyan
+//     unchanged stretches show purple-ish overlap; this is what the reference tool does)
+namespace graph_colours {
+    const QColor kBg            (165, 221, 233);   // the reference tool cyan
     const QColor kGrid          ( 90, 120, 130);
     const QColor kFrame         ( 30,  35,  40);
     const QColor kAxisText      ( 25,  30,  40);
     const QColor kTitleText     ( 25,  30,  40);
-    const QColor kOrigLine      ( 25,  60, 200);   // ECM blue
-    const QColor kModLine       (210,  35,  35);   // ECM red
+    const QColor kOrigLine      ( 25,  60, 200);   // the reference tool blue
+    const QColor kModLine       (210,  35,  35);   // the reference tool red
     const QColor kLegendBg      (255, 255, 255, 200);
     // Cursor crosshair colour - dark for visibility against the cyan
-    // background. Tooltip uses warm cream (matches ECM's tooltip box).
+    // background. Tooltip uses warm cream (matches the reference tool's tooltip box).
     const QColor kCursorLine    ( 30,  40,  60);
     const QColor kTooltipBg     (255, 246, 210);
     const QColor kTooltipBorder (140, 110,  60);
@@ -71,8 +71,8 @@ MapGraphWidget::MapGraphWidget(QWidget *parent)
     setMinimumSize(400, 300);
     setAutoFillBackground(true);
     // Enable mouseMoveEvent without requiring a button press, so the
-    // hover crosshair tracks the cursor in real time (matches ECM
-    // Titanium's "show RPM/Load/address at cursor" behaviour).
+    // hover crosshair tracks the cursor in real time (matches the reference tool
+    // reference's "show RPM/Load/address at cursor" behaviour).
     setMouseTracking(true);
 }
 
@@ -153,7 +153,7 @@ void MapGraphWidget::setMap(const MapDefinition *map,
     // Reset hover state so the previous map's tooltip doesn't linger.
     m_hoverIndex = -1;
 
-    // Y axis range matches ECM Titanium: it always uses the full u16 range
+    // Y axis range matches the reference tool: it always uses the full u16 range
     // (0..65535) regardless of the actual data span, so cell heights stay
     // consistent across maps and the user can compare scales between
     // different maps. The data values are u16 so this is the natural
@@ -171,10 +171,10 @@ void MapGraphWidget::paintEvent(QPaintEvent * /*event*/)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
 
-    p.fillRect(rect(), ecm_g::kBg);
+    p.fillRect(rect(), graph_colours::kBg);
 
     if (!m_map || (m_origValues.isEmpty() && m_modValues.isEmpty())) {
-        p.setPen(ecm_g::kAxisText);
+        p.setPen(graph_colours::kAxisText);
         p.drawText(rect(), Qt::AlignCenter,
                    QStringLiteral("(no map / no data)"));
         return;
@@ -211,8 +211,8 @@ void MapGraphWidget::paintEvent(QPaintEvent * /*event*/)
         return plotB - t * double(plotB - plotT);
     };
 
-    // === Title (ECM uses canonical map name) ===
-    p.setPen(ecm_g::kTitleText);
+    // === Title (the reference tool uses canonical map name) ===
+    p.setPen(graph_colours::kTitleText);
     QFont titleFont = p.font();
     titleFont.setBold(true);
     p.setFont(titleFont);
@@ -236,7 +236,7 @@ void MapGraphWidget::paintEvent(QPaintEvent * /*event*/)
     p.setFont(small);
 
     // === Grid: 5 horizontal lines, 1 line per row of the map ===
-    p.setPen(QPen(ecm_g::kGrid, 1, Qt::DotLine));
+    p.setPen(QPen(graph_colours::kGrid, 1, Qt::DotLine));
     for (int i = 0; i <= 5; ++i) {
         const double y = plotT + double(plotB - plotT) * i / 5.0;
         p.drawLine(QPointF(plotL, y), QPointF(plotR, y));
@@ -249,8 +249,8 @@ void MapGraphWidget::paintEvent(QPaintEvent * /*event*/)
         }
     }
 
-    // === Y axis labels (ECM puts them on BOTH sides) ===
-    p.setPen(ecm_g::kAxisText);
+    // === Y axis labels (the reference tool puts them on BOTH sides) ===
+    p.setPen(graph_colours::kAxisText);
     for (int i = 0; i <= 5; ++i) {
         const double y = plotT + double(plotB - plotT) * i / 5.0;
         const int v = int(m_yMax - yRange * i / 5.0);
@@ -265,7 +265,7 @@ void MapGraphWidget::paintEvent(QPaintEvent * /*event*/)
 
     // === X axis labels: hex addresses at 10 evenly-spaced ticks. Each
     // cell occupies cellSize bytes (typically 2), so the address at cell
-    // index i is base + i*cellSize. ECM Titanium shows these in its "Go
+    // index i is base + i*cellSize. the reference tool shows these in its "Go
     // to ..." box and cursor tooltip; we put them along the X axis so
     // they're visible at a glance. We also draw small tick marks above
     // the labels so each label clearly maps to a position on the plot.
@@ -288,10 +288,10 @@ void MapGraphWidget::paintEvent(QPaintEvent * /*event*/)
             const QString lbl = QStringLiteral("0x%1")
                                     .arg(a, 5, 16, QLatin1Char('0')).toUpper();
             // Tick mark
-            p.setPen(QPen(ecm_g::kFrame, 1));
+            p.setPen(QPen(graph_colours::kFrame, 1));
             p.drawLine(QPointF(x, plotB), QPointF(x, plotB + 3));
             // Label
-            p.setPen(ecm_g::kAxisText);
+            p.setPen(graph_colours::kAxisText);
             p.drawText(QRectF(x - 30, plotB + 4, 60, 14),
                        Qt::AlignCenter, lbl);
         }
@@ -301,33 +301,33 @@ void MapGraphWidget::paintEvent(QPaintEvent * /*event*/)
             const quint32 a = base + quint32((n - 1) * cellSize);
             const QString lbl = QStringLiteral("0x%1")
                                     .arg(a, 5, 16, QLatin1Char('0')).toUpper();
-            p.setPen(QPen(ecm_g::kFrame, 1));
+            p.setPen(QPen(graph_colours::kFrame, 1));
             p.drawLine(QPointF(x, plotB), QPointF(x, plotB + 3));
-            p.setPen(ecm_g::kAxisText);
+            p.setPen(graph_colours::kAxisText);
             p.drawText(QRectF(x - 60, plotB + 4, 60, 14),
                        Qt::AlignRight | Qt::AlignVCenter, lbl);
         }
     }
     // Caption under the axis: small explanatory line.
-    p.setPen(ecm_g::kAxisText);
+    p.setPen(graph_colours::kAxisText);
     p.drawText(QRectF(plotL, plotB + 20, plotR - plotL, 14),
                Qt::AlignCenter,
                QStringLiteral("address  -  %1 cells / %2 rows")
                    .arg(n).arg(effDY));
 
     // === Frame ===
-    p.setPen(QPen(ecm_g::kFrame, 1));
+    p.setPen(QPen(graph_colours::kFrame, 1));
     p.setBrush(Qt::NoBrush);
     p.drawRect(QRectF(plotL, plotT, plotR - plotL, plotB - plotT));
 
     // === Plot z-order: Modified (red) UNDER, Original (blue) ON TOP.
-    // ECM Titanium does the same. With this order:
+    // the reference tool does the same. With this order:
     //   - if orig == mod, the user sees a clean blue line and the
     //     "(Original = Modified)" hint above tells them why
     //   - if they differ, the modified line peeks out underneath wherever
     //     it's higher or lower than the original
     // We use opaque pens (no alpha) and 1px cosmetic lines so things
-    // render crisply even at high zoom levels - matches ECM's behaviour.
+    // render crisply even at high zoom levels - matches the reference tool's behaviour.
     auto plotSeries = [&](const QVector<int> &series, const QColor &c, int width) {
         if (series.isEmpty())
             return;
@@ -354,26 +354,26 @@ void MapGraphWidget::paintEvent(QPaintEvent * /*event*/)
     };
     // Modified first (drawn underneath, so it shows where it differs from
     // original), then Original on top.
-    plotSeries(m_modValues,  ecm_g::kModLine,  1);
-    plotSeries(m_origValues, ecm_g::kOrigLine, 1);
+    plotSeries(m_modValues,  graph_colours::kModLine,  1);
+    plotSeries(m_origValues, graph_colours::kOrigLine, 1);
 
     // === Legend ===
     const int lw = 110;
     const int lh = 38;
     const int lx = plotR - lw - 6;
     const int ly = plotT + 6;
-    p.setPen(QPen(ecm_g::kFrame, 1));
-    p.setBrush(QBrush(ecm_g::kLegendBg));
+    p.setPen(QPen(graph_colours::kFrame, 1));
+    p.setBrush(QBrush(graph_colours::kLegendBg));
     p.drawRect(QRectF(lx, ly, lw, lh));
 
-    p.setPen(QPen(ecm_g::kOrigLine, 1));
+    p.setPen(QPen(graph_colours::kOrigLine, 1));
     p.drawLine(lx + 6, ly + 12, lx + 28, ly + 12);
-    p.setPen(ecm_g::kAxisText);
+    p.setPen(graph_colours::kAxisText);
     p.drawText(QPointF(lx + 34, ly + 16), QStringLiteral("Original"));
 
-    p.setPen(QPen(ecm_g::kModLine, 1));
+    p.setPen(QPen(graph_colours::kModLine, 1));
     p.drawLine(lx + 6, ly + 28, lx + 28, ly + 28);
-    p.setPen(ecm_g::kAxisText);
+    p.setPen(graph_colours::kAxisText);
     p.drawText(QPointF(lx + 34, ly + 32), QStringLiteral("Modified"));
 
     // === "No differences" hint when the two series are identical ===
@@ -390,7 +390,7 @@ void MapGraphWidget::paintEvent(QPaintEvent * /*event*/)
                    QStringLiteral("(Original = Modified for this map)"));
     }
 
-    // === Hover crosshair + tooltip (ECM-style "RPM / Load / address") ===
+    // === Hover crosshair + tooltip (the reference tool-style "RPM / Load / address") ===
     // Snapped to the nearest cell so the values shown match exactly what
     // the user would see in the Table view at that cell. We draw the
     // crosshair on top of the plot lines but UNDER the legend, so the
@@ -402,7 +402,7 @@ void MapGraphWidget::paintEvent(QPaintEvent * /*event*/)
 
         // Vertical crosshair across the plot area.
         p.setRenderHint(QPainter::Antialiasing, false);
-        QPen cur(ecm_g::kCursorLine);
+        QPen cur(graph_colours::kCursorLine);
         cur.setWidth(1);
         cur.setCosmetic(true);
         p.setPen(cur);
@@ -486,10 +486,10 @@ void MapGraphWidget::paintEvent(QPaintEvent * /*event*/)
 
         // Draw tooltip box.
         QRectF box(boxX, boxY, boxW, boxH);
-        p.setPen(QPen(ecm_g::kTooltipBorder, 1));
-        p.setBrush(QBrush(ecm_g::kTooltipBg));
+        p.setPen(QPen(graph_colours::kTooltipBorder, 1));
+        p.setBrush(QBrush(graph_colours::kTooltipBg));
         p.drawRect(box);
-        p.setPen(ecm_g::kTooltipText);
+        p.setPen(graph_colours::kTooltipText);
         for (int i = 0; i < lines.size(); ++i) {
             const QString &ln = lines.at(i);
             p.drawText(QPointF(boxX + padX,
@@ -550,4 +550,4 @@ void MapGraphWidget::leaveEvent(QEvent *event)
     QWidget::leaveEvent(event);
 }
 
-} // namespace Titanium
+} // namespace EcuParser

@@ -4,7 +4,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace Titanium {
+namespace EcuParser {
 
 // Locates the bundled data/ directory (containing .drt drivers and bin files).
 // During development the build sits in <project>/build/ next to <project>/data/,
@@ -23,6 +23,6 @@ public:
     static QStringList listBins();
 };
 
-} // namespace Titanium
+} // namespace EcuParser
 
 #endif // APPPATHS_H

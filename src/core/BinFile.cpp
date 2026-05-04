@@ -3,7 +3,7 @@
 #include <QFile>
 #include <QDebug>
 
-namespace Titanium {
+namespace EcuParser {
 
 BinFile::BinFile() = default;
 
@@ -124,4 +124,4 @@ bool BinFile::writeBytes(quint32 offset, const QByteArray &bytes)
     return true;
 }
 
-} // namespace Titanium
+} // namespace EcuParser

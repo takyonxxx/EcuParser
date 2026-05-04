@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-namespace Titanium {
+namespace EcuParser {
 
 DriverTreeWidget::DriverTreeWidget(QWidget *parent)
     : QTreeWidget(parent)
@@ -54,7 +54,7 @@ void DriverTreeWidget::setDriver(const DriverModel *driver)
         catItem->setText(0, categoryDisplayName(cat));
         catItem->setExpanded(true);
 
-        // Sort within the category by ECM Titanium tree order so the UI
+        // Sort within the category by the reference tool tree order so the UI
         // matches Image 1 from the spec exactly.
         QList<const MapDefinition*> sorted = byCat.value(cat);
         std::sort(sorted.begin(), sorted.end(),
@@ -67,7 +67,7 @@ void DriverTreeWidget::setDriver(const DriverModel *driver)
             const QString name = DriverNames::displayName(driver->schemaId, *m);
 
             // Honour DriverNames::maxInstances - some maps that the .drt
-            // lists with multiple addresses are displayed by ECM Titanium
+            // lists with multiple addresses are displayed by the reference tool
             // as a single instance. Clamp the displayed count accordingly.
             int displayedInstances = m->addresses.size();
             const int cap = DriverNames::maxInstances(driver->schemaId, *m);
@@ -113,4 +113,4 @@ void DriverTreeWidget::onItemClicked(QTreeWidgetItem *item, int /*column*/)
         emit mapSelected(m, idx);
 }
 
-} // namespace Titanium
+} // namespace EcuParser

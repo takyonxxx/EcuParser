@@ -4,7 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 
-namespace Titanium {
+namespace EcuParser {
 
 QString AppPaths::dataDir()
 {
@@ -106,4 +106,4 @@ QStringList AppPaths::listBins()
     return out;
 }
 
-} // namespace Titanium
+} // namespace EcuParser

@@ -4,18 +4,18 @@
 #include <QString>
 #include <cstdint>
 
-namespace Titanium {
+namespace EcuParser {
 
 // Axis descriptor as it appears in a .drt map record.
 //
 // In the file an axis is a comma-separated 4-tuple, e.g. "G,P,0,076F0E"
 //   group   - 'G' (group/breakpoint table) or 'C' (constant / no axis)
 //   kind    - 'P' (parameter / lookup table), 'D' (data / inline), 'C' (constant)
-//   formula - integer 0..11, the Titanium "Tipo" (RPM = ... formula). Tipo 1 = fixed value.
+//   formula - integer 0..11, the reference "Tipo" (RPM = ... formula). Tipo 1 = fixed value.
 //   address - hex offset of the breakpoint table inside the bin (or 000000 if none)
 //
 // We keep the raw fields verbatim and only interpret them when needed; this
-// matches Titanium's storage and avoids losing information from drivers we
+// matches reference's storage and avoids losing information from drivers we
 // haven't fully decoded yet.
 struct AxisDefinition {
     char     group   = 'C';   // 'G' or 'C'
@@ -33,6 +33,6 @@ struct AxisDefinition {
     QString toDebugString() const;
 };
 
-} // namespace Titanium
+} // namespace EcuParser
 
 #endif // AXISDEFINITION_H

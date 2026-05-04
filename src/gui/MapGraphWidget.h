@@ -6,16 +6,16 @@
 #include <QWidget>
 #include <QVector>
 
-namespace Titanium {
+namespace EcuParser {
 
 class BinFile;
 
 // Line graph showing all cells of a map laid out in row-major order on a
-// single X axis. Mimics ECM Titanium's "Edit EPROM (graph)" view (Image 3
+// single X axis. Mimics the reference tool's "Edit EPROM (graph)" view (Image 3
 // in the spec): original bin drawn in blue, modified bin in red, optional
 // grid + value labels.
 //
-// We chose row-major flattening because that's exactly what Titanium does
+// We chose row-major flattening because that's exactly what reference does
 // and it visually highlights repeated patterns (each row becomes a sawtooth
 // when values are roughly monotonic per row).
 class MapGraphWidget : public QWidget
@@ -26,7 +26,7 @@ public:
 
     // Display the same map from two bins. Either may be nullptr; if both
     // are nullptr the widget is cleared. schemaId is used for canonical
-    // ECM-Titanium naming in the title.
+    // the reference tool-reference naming in the title.
     void setMap(const MapDefinition *map,
                 int instanceIndex,
                 const QString &schemaId,
@@ -76,6 +76,6 @@ private:
     static constexpr int kMargin = 40;
 };
 
-} // namespace Titanium
+} // namespace EcuParser
 
 #endif // MAPGRAPHWIDGET_H
