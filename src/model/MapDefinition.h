@@ -49,6 +49,17 @@ struct MapDefinition {
     double  offset = 0.0;
     QString unit;                 // "bar", "Nm", "mbar", "deg", etc.
 
+    // Embedded axis breakpoints. Populated by parsers or by
+    // DriverNames override injection (see MainWindow::loadDriver).
+    // When non-empty these win over reading axisX/axisY from the bin -
+    // useful for XDF files where the axis values are documented
+    // out-of-band (e.g. in the driver schema's hard-coded RPM table)
+    // rather than embedded in the bin at a known address.
+    // Size is expected to match dimX (xValues) and dimY (yValues) but
+    // consumers should range-check.
+    QList<int> xValues;           // RPM breakpoints (one per row)
+    QList<int> yValues;           // Load breakpoints (one per column)
+
     // Optional category hint set by parsers that already know the
     // category (e.g. XdfParser uses XDF's <CATEGORY> tag, or derives it
     // from the title). When unset (Other), category() falls back to the

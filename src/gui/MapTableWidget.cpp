@@ -254,14 +254,28 @@ void MapTableWidget::showMap(const BinFile *originalBin,
     const int colCount = effDimY;
     const int binStride = colCount;  // The override dim IS the true stride.
 
-    // Hard-coded axis overrides take precedence (used when the reference tool
-    // embeds the axis in the driver itself rather than the bin). Then we
-    // fall back to bin reads, then synthesised Load%.
-    QList<int> rowAxis = DriverNames::axisXOverride(schemaId, *map);
+    // Axis resolution priority:
+    //   1. Embedded MapDefinition.xValues/yValues (filled by
+    //      MainWindow::loadDriver from DriverNames overrides) - this is
+    //      the canonical source and works for both DRT and XDF.
+    //   2. DriverNames::axisXOverride/axisYOverride direct lookup - kept
+    //      as a safety net in case a future call path constructs a
+    //      MapDefinition without going through loadDriver's injection.
+    //   3. Bin-embedded axis at the address in MapDefinition.axisX/axisY.
+    //   4. For Y only: synthesised 0..100 Load% scale.
+    QList<int> rowAxis;
+    if (!map->xValues.isEmpty())
+        rowAxis = map->xValues;
+    if (rowAxis.isEmpty())
+        rowAxis = DriverNames::axisXOverride(schemaId, *map);
     if (rowAxis.isEmpty())
         rowAxis = readAxisValues(primary, map->axisX, rowCount);
 
-    QList<int> colAxis = DriverNames::axisYOverride(schemaId, *map);
+    QList<int> colAxis;
+    if (!map->yValues.isEmpty())
+        colAxis = map->yValues;
+    if (colAxis.isEmpty())
+        colAxis = DriverNames::axisYOverride(schemaId, *map);
     if (colAxis.isEmpty())
         colAxis = readAxisValues(primary, map->axisY, colCount);
     if (colAxis.isEmpty())

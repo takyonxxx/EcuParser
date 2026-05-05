@@ -133,17 +133,25 @@ void MapGraphWidget::setMap(const MapDefinition *map,
                                 instanceIndex, effDimX, effDimY);
 
     // Cache RPM (axisX, rows) and Load (axisY, cols) breakpoint arrays.
-    // Priority: DriverNames axis override -> bin read -> synthesised
-    // (Load only). Same logic the table widget uses, kept in sync so the
-    // cursor tooltip shows the same values the table does.
+    // Priority: MapDefinition.xValues/yValues (injected from
+    // DriverNames in MainWindow::loadDriver) -> direct DriverNames
+    // lookup -> bin read -> synthesised (Load only). Same logic the
+    // table widget uses, kept in sync so the cursor tooltip shows the
+    // same values the table does.
     m_rpmAxis.clear();
     m_loadAxis.clear();
     if (map) {
         const BinFile *primary = modifiedBin ? modifiedBin : originalBin;
-        m_rpmAxis = DriverNames::axisXOverride(schemaId, *map);
+        if (!map->xValues.isEmpty())
+            m_rpmAxis = map->xValues;
+        if (m_rpmAxis.isEmpty())
+            m_rpmAxis = DriverNames::axisXOverride(schemaId, *map);
         if (m_rpmAxis.isEmpty())
             m_rpmAxis = readAxisValuesLE(primary, map->axisX, effDimX);
-        m_loadAxis = DriverNames::axisYOverride(schemaId, *map);
+        if (!map->yValues.isEmpty())
+            m_loadAxis = map->yValues;
+        if (m_loadAxis.isEmpty())
+            m_loadAxis = DriverNames::axisYOverride(schemaId, *map);
         if (m_loadAxis.isEmpty())
             m_loadAxis = readAxisValuesLE(primary, map->axisY, effDimY);
         if (m_loadAxis.isEmpty())
@@ -434,16 +442,19 @@ void MapGraphWidget::paintEvent(QPaintEvent * /*event*/)
                               ? m_modValues.at(m_hoverIndex) : -1;
 
         // Build tooltip text. Each line shows one piece of info; we
-        // include only the lines that have meaningful data.
+        // include only the lines that have meaningful data. The label
+        // stays "RPM" / "Load" even when the driver doesn't supply a
+        // breakpoint axis - the user always thinks in those terms; the
+        // raw row/col index is what we fall back to as the value.
         QStringList lines;
         if (rpm >= 0)
             lines << QStringLiteral("RPM:     %1").arg(rpm);
         else
-            lines << QStringLiteral("Row:     %1").arg(row);
+            lines << QStringLiteral("RPM:     %1").arg(row);
         if (col < m_loadAxis.size())
             lines << QStringLiteral("Load:    %1").arg(load);
         else
-            lines << QStringLiteral("Col:     %1").arg(col);
+            lines << QStringLiteral("Load:    %1").arg(col);
         lines << QStringLiteral("Addr:    0x%1")
                      .arg(cellAddr, 5, 16, QLatin1Char('0')).toUpper();
         if (origV >= 0 && modV >= 0 && origV != modV)

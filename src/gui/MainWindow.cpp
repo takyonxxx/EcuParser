@@ -366,8 +366,27 @@ bool MainWindow::loadDriver(const QString &path)
     // either what the parser already filled (XDF MATH equation, in
     // future) or what DriverNames knows about (rail pressure -> bar,
     // torque limiter -> Nm proxy, etc.).
-    for (MapDefinition &m : m_driver->maps)
+    //
+    // Same pass also injects canonical RPM/Load breakpoint arrays from
+    // DriverNames. Some XDF files (e.g. 28F0_100.xdf shipped with this
+    // project) describe axes only as <units>RPM</units> without an
+    // EMBEDDEDDATA address, so the axis addresses arrive as 0 and the
+    // table widget would otherwise fall back to row-index headers
+    // (0, 1, 2, ...). Copying the override into MapDefinition.xValues/
+    // yValues makes the canonical breakpoints available regardless of
+    // whether the driver source was DRT or XDF, and MapTableWidget /
+    // MapGraphWidget consult these embedded values first.
+    for (MapDefinition &m : m_driver->maps) {
         DriverNames::applyUnitOverride(m_driver->schemaId, &m);
+        const QList<int> xOver = DriverNames::axisXOverride(
+            m_driver->schemaId, m);
+        if (!xOver.isEmpty())
+            m.xValues = xOver;
+        const QList<int> yOver = DriverNames::axisYOverride(
+            m_driver->schemaId, m);
+        if (!yOver.isEmpty())
+            m.yValues = yOver;
+    }
     m_tree->setDriver(m_driver.get());
     m_tableView->clearMap();
     m_graphView->clear();
