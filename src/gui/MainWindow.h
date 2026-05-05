@@ -20,6 +20,7 @@ namespace EcuParser {
 class DriverTreeWidget;
 class MapTableWidget;
 class MapGraphWidget;
+class HexEditorWidget;
 
 // Dual-bin map browser with table & graph views.
 //
@@ -122,6 +123,7 @@ public:
     MapGraphWidget   *m_graphView    = nullptr;
     class DiffViewWidget *m_diffView = nullptr;
     class Surface3DWidget *m_surfaceView = nullptr;
+    HexEditorWidget *m_hexView = nullptr;
 
     // Owned data.
     std::unique_ptr<DriverModel> m_driver;

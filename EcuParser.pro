@@ -34,6 +34,7 @@ HEADERS += \
     src/model/DriverNames.h \
     src/gui/MainWindow.h \
     src/gui/DriverTreeWidget.h \
+    src/gui/HexEditorWidget.h \
     src/gui/MapTableWidget.h \
     src/gui/MapGraphWidget.h \
     src/gui/DiffViewWidget.h \
@@ -57,6 +58,7 @@ SOURCES += \
     src/model/DriverNames.cpp \
     src/gui/MainWindow.cpp \
     src/gui/DriverTreeWidget.cpp \
+    src/gui/HexEditorWidget.cpp \
     src/gui/MapTableWidget.cpp \
     src/gui/MapGraphWidget.cpp \
     src/gui/DiffViewWidget.cpp \

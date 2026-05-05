@@ -5,6 +5,7 @@
 #include "CustomTuneDialog.h"
 #include "DiffViewWidget.h"
 #include "DriverTreeWidget.h"
+#include "HexEditorWidget.h"
 #include "../model/DriverNames.h"
 #include "MapGraphWidget.h"
 #include "MapTableWidget.h"
@@ -206,10 +207,13 @@ void MainWindow::buildUi()
     m_graphView = new MapGraphWidget(m_tabs);
     m_diffView  = new DiffViewWidget(m_tabs);
     m_surfaceView = new Surface3DWidget(m_tabs);
+    m_hexView   = new HexEditorWidget(m_tabs);
+    m_hexView->setMainWindow(this);
     m_tabs->addTab(m_tableView,   QStringLiteral("Table"));
     m_tabs->addTab(m_graphView,   QStringLiteral("Graph"));
     m_tabs->addTab(m_surfaceView, QStringLiteral("3D"));
     m_tabs->addTab(m_diffView,    QStringLiteral("Diff"));
+    m_tabs->addTab(m_hexView,     QStringLiteral("Hex"));
     split->addWidget(m_tree);
     split->addWidget(m_tabs);
     split->setStretchFactor(0, 0);
@@ -399,6 +403,8 @@ bool MainWindow::loadOriginalBin(const QString &path)
         4000);
     refreshTitle();
     m_tree->setBins(m_origBin.get(), m_modBin.get());
+    if (m_hexView)
+        m_hexView->setBins(m_origBin.get(), m_modBin.get());
     refreshCurrentMap();
 
     // === Driver auto-detect ===
@@ -627,6 +633,8 @@ bool MainWindow::loadModifiedBin(const QString &path)
         4000);
     refreshTitle();
     m_tree->setBins(m_origBin.get(), m_modBin.get());
+    if (m_hexView)
+        m_hexView->setBins(m_origBin.get(), m_modBin.get());
     refreshCurrentMap();
     return true;
 }
@@ -1365,6 +1373,7 @@ void MainWindow::undoRedoRefresh()
     refreshTitle();
     refreshCurrentMap();
     if (m_tree) m_tree->refreshDiffHighlights();
+    if (m_hexView) m_hexView->refresh();
 }
 
 void MainWindow::pushUndoCommand(QUndoCommand *cmd)
