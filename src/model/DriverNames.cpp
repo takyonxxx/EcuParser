@@ -60,14 +60,18 @@ const QHash<MapKey, NameEntry> &table()
         QHash<MapKey, NameEntry> m;
         const QString s28 = QStringLiteral("28F0_100");
 
-        // Five 16-row injection maps share the same hand-picked RPM axis
+        // Six 16-row injection maps share the same hand-picked RPM axis
         // in the reference tool - it's embedded in the driver, not in the bin.
-        // We hard-code the values from the reference tool Image 1 for all five:
+        // We hard-code the values from the reference tool Image 1 for all six:
+        //   0x076F52 (injection at part throttle)
         //   0x07ADD2 (rail pressure)
         //   0x072CF0 (Map 1)
         //   0x072FC0 (Map 2)
         //   0x078C5A (Map 1 Boost x RPM)
         //   0x0791FA (Map 2 Boost x RPM)
+        // Without the override, XDFs that don't carry an explicit X-axis
+        // address fall back to showing raw row indices (0..15) in the
+        // RPM column header, which confuses users reading the table.
         const QList<int> sharedInjectionRpm {
             700, 800, 900, 1000, 1100, 1300, 1500, 1700,
             1900, 2100, 2400, 2700, 3100, 3500, 4000, 4500
@@ -87,8 +91,8 @@ const QHash<MapKey, NameEntry> &table()
         // 11   0x76D82   19x1    torque limiter
 
         m.insert({s28, 0x076F52},
-                 {QStringLiteral("injection at part throttle"), 1, 16, 16, {}, {},
-                  MapCategory::Injection, 0,
+                 {QStringLiteral("injection at part throttle"), 1, 16, 16,
+                  sharedInjectionRpm, {}, MapCategory::Injection, 0,
                   // No clean physical unit for raw injector pulse counts; leave raw.
                   1.0, 0.0, QString()});
         m.insert({s28, 0x07ADD2},
@@ -158,13 +162,6 @@ const QHash<MapKey, NameEntry> &table()
                   // peak limiter raw value 7500 (verified across stock
                   // bins 293-822 and 409-438 at rows 6-7). Linear proxy
                   // 400/7500 = 0.05333 Nm per raw count.
-                  //
-                  // Don't confuse with the VM Motori 2.7 CRD variant
-                  // (R425/R428) used in some other Chrysler/Jeep markets,
-                  // which is rated 295 Nm / 175 PS - that's a different
-                  // engine block in the same chassis. The Jeep WJ 2.7
-                  // CRD sold in Europe with the Bosch EDC15C 28F0_100
-                  // calibration and the bins we work with all use OM612.
                   400.0 / 7500.0, 0.0, QStringLiteral("Nm")});
 
         return m;

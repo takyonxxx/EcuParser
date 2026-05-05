@@ -436,44 +436,13 @@ bool MainWindow::loadOriginalBin(const QString &path)
     // same schema 28F0_100 but represent different SW revisions).
     const QString detected = m_origBin->detectSchema();
 
-    // Family-aware compatibility check: a driver is "compatible enough"
-    // with the bin if either:
-    //   - schema strings match exactly (28F0_100 driver + 28F0_100 bin)
-    //   - both belong to the same ECU family. For GM PCM 0411 the
-    //     family is identified by the bin's "GM_0411_OS<N>" prefix,
-    //     and any XDF whose schema id contains an 8-digit GM OS number
-    //     (typical filename pattern, e.g. "12587604_OS_2023-06-23")
-    //     counts as a 0411 driver. Cross-OS-revision XDFs are imperfect
-    //     - some addresses will be wrong - but the user knows that and
-    //     wants to use what they have rather than be blocked.
+    // Compatibility check: a driver is compatible with a bin only
+    // when their schema strings match exactly. Only one ECU is
+    // supported (Bosch EDC15C 28F0_100 - Jeep WJ 2.7 CRD), so
+    // there is no cross-family fallback to consider.
     auto isFamilyCompatible = [](const QString &driverSchema,
                                  const QString &binSchema) {
-        if (driverSchema == binSchema) return true;
-        // GM family heuristic: a bin schema like "GM_0411_OS<n>" or
-        // "GM_E40_OS<n>" is compatible with any driver schema id that
-        // contains an 8-digit GM OS number (typical XDF filename
-        // pattern, e.g. "12598977_OS_V1_0_BETA"). Cross-OS-revision
-        // XDFs are imperfect - some addresses can shift between
-        // revisions - but they're useful enough that we let the user
-        // proceed rather than blocking the load. The GUI surfaces a
-        // warning so the user knows to verify.
-        if (binSchema.startsWith(QStringLiteral("GM_0411"))
-         || binSchema.startsWith(QStringLiteral("GM_E40"))) {
-            const QRegularExpression re(QStringLiteral("\\b(12\\d{6})\\b"));
-            return re.match(driverSchema).hasMatch();
-        }
-        // Chrysler JTEC heuristic: bin schema "Chrysler_JTEC_<partno>"
-        // is compatible with any driver schema whose id contains the
-        // Chrysler service-number prefix "5604" followed by 6 chars.
-        // Cross-OS JTEC drivers are even less reliable than cross-OS
-        // GM drivers (the calibration layout reorganises between
-        // service revisions) but the user can still browse and edit
-        // - we just hint that values may be wrong.
-        if (binSchema.startsWith(QStringLiteral("Chrysler_JTEC_"))) {
-            const QRegularExpression re(QStringLiteral("\\b(5604[0-9A-Z]{6})\\b"));
-            return re.match(driverSchema).hasMatch();
-        }
-        return false;
+        return driverSchema == binSchema;
     };
 
     const bool needAutoPick = !m_driver
@@ -481,13 +450,11 @@ bool MainWindow::loadOriginalBin(const QString &path)
             && !isFamilyCompatible(m_driver->schemaId, detected));
     if (needAutoPick && !detected.isEmpty()) {
         const QStringList drvs = AppPaths::listDrivers();
-        // Walk every available driver and check which ones have schema
-        // == detected. We do NOT auto-load if 0 or multiple match - we
-        // surface the suggestion in the status bar instead so the user
-        // can decide.
-        // Walk every available driver and check which ones are
-        // compatible with the detected schema (exact match OR family
-        // match - see isFamilyCompatible above).
+        // Walk every available driver and check which ones have a
+        // schema id that matches the detected schema. We do NOT
+        // auto-load if 0 or multiple match - we surface the
+        // suggestion in the status bar instead so the user can
+        // decide.
         QStringList matching;
         for (const QString &drvPath : drvs) {
             const QString ext = QFileInfo(drvPath).suffix().toLower();
@@ -507,40 +474,6 @@ bool MainWindow::loadOriginalBin(const QString &path)
             const int idx = m_driverCombo->findData(matching.first());
             if (idx >= 0) m_driverCombo->setCurrentIndex(idx);
 
-            // For cross-revision driver matches in any of the
-            // multi-revision families (GM 0411, GM E40, Chrysler
-            // JTEC), warn about possible address shifts. The driver
-            // may come from a different OS / part number than the
-            // bin. Map definitions are still useful but some
-            // addresses will be wrong - the user should verify
-            // before relying on edits.
-            const bool isMultiRevFamily =
-                detected.startsWith(QStringLiteral("GM_0411"))
-             || detected.startsWith(QStringLiteral("GM_E40"))
-             || detected.startsWith(QStringLiteral("Chrysler_JTEC_"));
-            if (isMultiRevFamily
-                && m_driver
-                && m_driver->schemaId != detected) {
-                const QString familyName =
-                    detected.startsWith(QStringLiteral("Chrysler_JTEC_"))
-                        ? QStringLiteral("Chrysler JTEC")
-                        : (detected.startsWith(QStringLiteral("GM_E40"))
-                            ? QStringLiteral("GM E40")
-                            : QStringLiteral("GM PCM 0411"));
-                QMessageBox::information(this,
-                    QStringLiteral("Driver loaded"),
-                    QStringLiteral(
-                        "Loaded driver '%1' (schema %2) for a bin from "
-                        "a different revision (%3). Both belong to "
-                        "the %4 family so most map definitions should "
-                        "be useful, but some map addresses can shift "
-                        "between revisions - verify map values look "
-                        "reasonable before saving edits.")
-                        .arg(QFileInfo(matching.first()).fileName(),
-                             m_driver->schemaId,
-                             detected,
-                             familyName));
-            }
             statusBar()->showMessage(
                 QStringLiteral("Auto-loaded driver %1 (schema %2 detected)")
                     .arg(QFileInfo(matching.first()).fileName(), detected),
@@ -553,52 +486,16 @@ bool MainWindow::loadOriginalBin(const QString &path)
                     .arg(detected).arg(matching.size()),
                 6000);
         } else {
-            // No driver matches the detected schema. Build a family-
-            // aware message so the user knows what's needed - generic
-            // bins should not pretend to be EDC15C even if the size
-            // happens to match.
-            QString familyHint;
-            if (detected.startsWith(QStringLiteral("GM_0411"))
-             || detected.startsWith(QStringLiteral("GM_E40"))) {
-                const QString family =
-                    detected.startsWith(QStringLiteral("GM_E40"))
-                        ? QStringLiteral("GM E40")
-                        : QStringLiteral("GM PCM 0411");
-                familyHint = QStringLiteral(
-                    "This bin appears to be a %1 calibration (%2). "
-                    "EcuParser ships drivers for Bosch EDC15C 28F0_100 "
-                    "only. To work with this bin, supply a compatible "
-                    "XML XDF or DRT defining its maps and load it from "
-                    "the Driver combo. Community XDFs are available "
-                    "from PCMHacking / LS1Tech / GearheadEFI forums.")
-                    .arg(family, detected);
-            } else if (detected.startsWith(QStringLiteral("Chrysler_JTEC_"))) {
-                familyHint = QStringLiteral(
-                    "This bin appears to be a Chrysler JTEC PCM "
-                    "calibration (%1). EcuParser detects the part "
-                    "number but does not ship a JTEC driver - "
-                    "publicly available XDFs for JTEC are scarce and "
-                    "fragmented across Chrysler service revisions. "
-                    "To work with this bin you'll need to supply your "
-                    "own XML XDF or DRT (try forums.jeepforum.com, "
-                    "jeepstrokers.com, or commercial tuners like FRP "
-                    "Tuning, Syked, B&G). Note: JTEC tunes are "
-                    "unrelated to the Stage 1 / Stage 2 packages we "
-                    "ship - those are diesel-specific and don't apply "
-                    "to gasoline JTEC platforms.")
-                    .arg(detected);
-            } else {
-                familyHint = QStringLiteral(
-                    "Schema %1 detected, but no shipped driver matches. "
-                    "Load a compatible XDF or DRT from the Driver combo.")
-                    .arg(detected);
-            }
-            // Show as a non-blocking dialog so the user reads it
-            // explicitly - the status bar message would scroll past
-            // unnoticed on first load.
+            // No driver matches the detected schema. The only schema
+            // we detect is 28F0_100, so this branch fires when the
+            // bin looks like a 28F0_100 image but no driver file is
+            // present in data/drivers/. Direct the user there.
             QMessageBox::information(this,
                 QStringLiteral("Bin loaded"),
-                familyHint);
+                QStringLiteral(
+                    "Schema %1 detected, but no shipped driver matches. "
+                    "Load a compatible XDF or DRT from the Driver combo.")
+                    .arg(detected));
             statusBar()->showMessage(
                 QStringLiteral("Schema %1 detected - no driver loaded")
                     .arg(detected),
