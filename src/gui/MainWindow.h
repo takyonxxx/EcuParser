@@ -94,6 +94,18 @@ public:
     // No-op when m_undoStack is null.
     void pushUndoCommand(class QUndoCommand *cmd);
 
+    // Refresh the Apply Stage button's enabled state and tooltip based
+    // on the currently loaded driver and original bin. The button is
+    // only useful when:
+    //   - a driver is loaded (so we know the schema id)
+    //   - the driver schema is one we ship stages for (currently only
+    //     28F0_100 - the WJ 2.7 CRD OM612 EDC15C calibration)
+    //   - an original bin is loaded (stages need a stock baseline)
+    // When any of these are missing the button is disabled and its
+    // tooltip explains why. Called from loadDriver() and
+    // loadOriginalBin() right after the relevant state changes.
+    void refreshApplyStageButton();
+
     // Toolbar widgets
     QComboBox  *m_driverCombo = nullptr;
     QComboBox  *m_origBinCombo = nullptr;

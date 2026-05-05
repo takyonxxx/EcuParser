@@ -35,6 +35,7 @@
 #include <QMessageBox>
 #include <QInputDialog>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSet>
 #include <QSplitter>
 #include <QStatusBar>
@@ -287,6 +288,10 @@ void MainWindow::populateDataCombos()
     const QStringList bins = AppPaths::listBins();
     fillBinCombo(m_origBinCombo, bins);
     fillBinCombo(m_modBinCombo, bins);
+
+    // Apply Stage starts disabled; refresh sets the right state once
+    // the user loads a driver and original bin.
+    refreshApplyStageButton();
 }
 
 void MainWindow::onDriverComboChanged(int index)
@@ -373,6 +378,7 @@ bool MainWindow::loadDriver(const QString &path)
             .arg(m_driver->maps.size())
             .arg(ext.toUpper()),
         4000);
+    refreshApplyStageButton();
     return true;
 }
 
@@ -404,14 +410,48 @@ bool MainWindow::loadOriginalBin(const QString &path)
     // misrepresent the bin (J293_822/J094_704/J409_438 all use the
     // same schema 28F0_100 but represent different SW revisions).
     const QString detected = m_origBin->detectSchema();
+
+    // Family-aware compatibility check: a driver is "compatible enough"
+    // with the bin if either:
+    //   - schema strings match exactly (28F0_100 driver + 28F0_100 bin)
+    //   - both belong to the same ECU family. For GM PCM 0411 the
+    //     family is identified by the bin's "GM_0411_OS<N>" prefix,
+    //     and any XDF whose schema id contains an 8-digit GM OS number
+    //     (typical filename pattern, e.g. "12587604_OS_2023-06-23")
+    //     counts as a 0411 driver. Cross-OS-revision XDFs are imperfect
+    //     - some addresses will be wrong - but the user knows that and
+    //     wants to use what they have rather than be blocked.
+    auto isFamilyCompatible = [](const QString &driverSchema,
+                                 const QString &binSchema) {
+        if (driverSchema == binSchema) return true;
+        // GM family heuristic: a bin schema like "GM_0411_OS<n>" or
+        // "GM_E40_OS<n>" is compatible with any driver schema id that
+        // contains an 8-digit GM OS number (typical XDF filename
+        // pattern, e.g. "12598977_OS_V1_0_BETA"). Cross-OS-revision
+        // XDFs are imperfect - some addresses can shift between
+        // revisions - but they're useful enough that we let the user
+        // proceed rather than blocking the load. The GUI surfaces a
+        // warning so the user knows to verify.
+        if (binSchema.startsWith(QStringLiteral("GM_0411"))
+         || binSchema.startsWith(QStringLiteral("GM_E40"))) {
+            const QRegularExpression re(QStringLiteral("\\b(12\\d{6})\\b"));
+            return re.match(driverSchema).hasMatch();
+        }
+        return false;
+    };
+
     const bool needAutoPick = !m_driver
-        || (m_driver && !detected.isEmpty() && m_driver->schemaId != detected);
+        || (m_driver && !detected.isEmpty()
+            && !isFamilyCompatible(m_driver->schemaId, detected));
     if (needAutoPick && !detected.isEmpty()) {
         const QStringList drvs = AppPaths::listDrivers();
         // Walk every available driver and check which ones have schema
         // == detected. We do NOT auto-load if 0 or multiple match - we
         // surface the suggestion in the status bar instead so the user
         // can decide.
+        // Walk every available driver and check which ones are
+        // compatible with the detected schema (exact match OR family
+        // match - see isFamilyCompatible above).
         QStringList matching;
         for (const QString &drvPath : drvs) {
             const QString ext = QFileInfo(drvPath).suffix().toLower();
@@ -421,7 +461,7 @@ bool MainWindow::loadOriginalBin(const QString &path)
                 p = XdfParser::parseFile(drvPath, &perr);
             else
                 p = DrtParser::parseFile(drvPath, &perr);
-            if (p && p->schemaId == detected)
+            if (p && isFamilyCompatible(p->schemaId, detected))
                 matching.append(drvPath);
         }
         if (matching.size() == 1) {
@@ -430,6 +470,32 @@ bool MainWindow::loadOriginalBin(const QString &path)
             loadDriver(matching.first());
             const int idx = m_driverCombo->findData(matching.first());
             if (idx >= 0) m_driverCombo->setCurrentIndex(idx);
+
+            // For GM family bins (0411 or E40) with a cross-OS driver
+            // match, warn about address shift. The driver might come
+            // from a different OS revision than the bin (e.g. driver
+            // 12587604 + bin 12216125). Map definitions are still
+            // useful but some addresses will be wrong - the user
+            // should verify before relying on edits.
+            const bool isGmFamily =
+                detected.startsWith(QStringLiteral("GM_0411"))
+             || detected.startsWith(QStringLiteral("GM_E40"));
+            if (isGmFamily
+                && m_driver
+                && m_driver->schemaId != detected) {
+                QMessageBox::information(this,
+                    QStringLiteral("Driver loaded"),
+                    QStringLiteral(
+                        "Loaded driver '%1' (schema %2) for a bin from "
+                        "a different OS revision (%3). Both belong to "
+                        "the same GM PCM family so most map definitions "
+                        "should be useful, but some map addresses can "
+                        "shift between OS revisions - verify map values "
+                        "look reasonable before saving edits.")
+                        .arg(QFileInfo(matching.first()).fileName(),
+                             m_driver->schemaId,
+                             detected));
+            }
             statusBar()->showMessage(
                 QStringLiteral("Auto-loaded driver %1 (schema %2 detected)")
                     .arg(QFileInfo(matching.first()).fileName(), detected),
@@ -441,6 +507,41 @@ bool MainWindow::loadOriginalBin(const QString &path)
                                "Pick one from the Driver combo.")
                     .arg(detected).arg(matching.size()),
                 6000);
+        } else {
+            // No driver matches the detected schema. Build a family-
+            // aware message so the user knows what's needed - generic
+            // bins should not pretend to be EDC15C even if the size
+            // happens to match.
+            QString familyHint;
+            if (detected.startsWith(QStringLiteral("GM_0411"))
+             || detected.startsWith(QStringLiteral("GM_E40"))) {
+                const QString family =
+                    detected.startsWith(QStringLiteral("GM_E40"))
+                        ? QStringLiteral("GM E40")
+                        : QStringLiteral("GM PCM 0411");
+                familyHint = QStringLiteral(
+                    "This bin appears to be a %1 calibration (%2). "
+                    "EcuParser ships drivers for Bosch EDC15C 28F0_100 "
+                    "only. To work with this bin, supply a compatible "
+                    "XML XDF or DRT defining its maps and load it from "
+                    "the Driver combo.")
+                    .arg(family, detected);
+            } else {
+                familyHint = QStringLiteral(
+                    "Schema %1 detected, but no shipped driver matches. "
+                    "Load a compatible XDF or DRT from the Driver combo.")
+                    .arg(detected);
+            }
+            // Show as a non-blocking dialog so the user reads it
+            // explicitly - the status bar message would scroll past
+            // unnoticed on first load.
+            QMessageBox::information(this,
+                QStringLiteral("Bin loaded"),
+                familyHint);
+            statusBar()->showMessage(
+                QStringLiteral("Schema %1 detected - no driver loaded")
+                    .arg(detected),
+                8000);
         }
     }
 
@@ -454,6 +555,7 @@ bool MainWindow::loadOriginalBin(const QString &path)
     // consistent with whatever the user considers the "stock" - even
     // if they reload original after modified.
     refreshProtectedSnapshots();
+    refreshApplyStageButton();
     return true;
 }
 
@@ -516,6 +618,59 @@ void MainWindow::refreshProtectedSnapshots()
         descs.append(pr.description);
     }
     m_modBin->setProtectedSnapshots(m_origBin->raw(), regions, descs);
+}
+
+void MainWindow::refreshApplyStageButton()
+{
+    if (!m_applyStageBtn) return;
+    // Apply Stage works only when:
+    //   - a driver is loaded (we know the schema id)
+    //   - the schema id matches a calibration we ship stages for
+    //     (currently only 28F0_100 - the WJ 2.7 CRD OM612 EDC15C
+    //     calibration). Stage JSONs reference maps by name and
+    //     assume a particular schema's address layout / value
+    //     ranges, so applying them to other ECUs is unsafe.
+    //   - an original bin is loaded (stages need a stock baseline
+    //     to compute deltas against).
+    //
+    // When any of these is missing we disable the button and put
+    // the reason in the tooltip so the user can hover to find out
+    // why it's greyed out.
+    const bool haveDriver = (m_driver != nullptr);
+    const bool haveOrig   = (m_origBin != nullptr);
+    const QString schema  = haveDriver ? m_driver->schemaId : QString();
+    const bool schemaSupportsStages =
+        (schema == QStringLiteral("28F0_100"));
+
+    const bool enabled = haveDriver && haveOrig && schemaSupportsStages;
+    m_applyStageBtn->setEnabled(enabled);
+
+    QString tip;
+    if (!haveDriver) {
+        tip = QStringLiteral(
+            "Apply Stage is unavailable: load a driver first so "
+            "the schema is known.");
+    } else if (!haveOrig) {
+        tip = QStringLiteral(
+            "Apply Stage is unavailable: load an original bin "
+            "first - stages need a stock baseline.");
+    } else if (!schemaSupportsStages) {
+        tip = QStringLiteral(
+            "Apply Stage is unavailable for schema '%1'. The "
+            "shipped stage packages (Stage 1, Stage 2, Economy "
+            "Soft, Economy Hard) target schema 28F0_100 only "
+            "(Jeep WJ 2.7 CRD, Mercedes OM612, Bosch EDC15C). "
+            "Other schemas can browse and edit maps but cannot "
+            "apply stages.")
+            .arg(schema);
+    } else {
+        // Default tooltip when enabled.
+        tip = QStringLiteral(
+            "Apply a pre-defined Stage 1 / Stage 2 / Economy "
+            "tune to the modified bin using the original as the "
+            "source. The original is unchanged.");
+    }
+    m_applyStageBtn->setToolTip(tip);
 }
 
 void MainWindow::onMapSelected(const MapDefinition *map, int addressIndex)

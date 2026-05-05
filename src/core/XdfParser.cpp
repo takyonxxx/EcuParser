@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QSet>
 #include <QXmlStreamReader>
 
 namespace EcuParser {
@@ -321,6 +322,88 @@ std::optional<DriverModel> XdfParser::parseFile(const QString &path,
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly))
         return fail(QStringLiteral("Cannot open: %1").arg(f.errorString()));
+
+    // Detect non-XML XDF variants up front so we can give the user a
+    // useful, specific error instead of the generic "incorrectly
+    // encoded content" message that QXmlStreamReader produces when it
+    // hits a binary file.
+    //
+    // TunerPro XDFs come in three flavours in the wild:
+    //   1. Plain XML (what we support) - opens with "<?xml" or "<XDF"
+    //   2. Legacy binary XDF format (early TunerPro versions, no
+    //      published spec) - mostly-zero with sparse structure
+    //   3. Encrypted XDF (TunerPro RT password-protected) - high-
+    //      entropy random-looking bytes throughout
+    //
+    // The detection is heuristic but cheap and produces clear
+    // diagnostics. We sample 1 KB starting at offset 0x100 (after
+    // any small header) because both encrypted and legacy binary
+    // XDFs commonly have a sparse 0..0xFF header before the actual
+    // payload begins.
+    QByteArray peek = f.peek(0x500);  // 1280 bytes
+    f.seek(0);
+
+    auto looksLikeXml = [](const QByteArray &b) {
+        // Skip common BOMs, then look for '<' as the first non-
+        // whitespace character.
+        int i = 0;
+        if (b.size() >= 3 &&
+            quint8(b[0]) == 0xEF && quint8(b[1]) == 0xBB && quint8(b[2]) == 0xBF) {
+            i = 3;
+        } else if (b.size() >= 2 &&
+            (quint8(b[0]) == 0xFF && quint8(b[1]) == 0xFE)) {
+            // UTF-16 LE BOM - rare but valid for XML
+            return true;
+        } else if (b.size() >= 2 &&
+            (quint8(b[0]) == 0xFE && quint8(b[1]) == 0xFF)) {
+            // UTF-16 BE BOM
+            return true;
+        }
+        while (i < b.size() &&
+               (b[i] == ' ' || b[i] == '\t' || b[i] == '\r' || b[i] == '\n'))
+            ++i;
+        return i < b.size() && b[i] == '<';
+    };
+
+    if (!looksLikeXml(peek)) {
+        // Telling encrypted XDF apart from legacy binary XDF: we
+        // sample bytes at offset 0x100..0x200 (256 bytes deep into
+        // the file, past any small length-prefix header) and count
+        // unique byte values. Encrypted output is essentially
+        // uniform random - in 256 bytes we expect ~150-200 distinct
+        // values. Legacy binary XDF has heavy zero-padding and lots
+        // of repeated small integers - usually <100 distinct values
+        // in any 256-byte window.
+        const int sampleStart = qMin(0x100, peek.size());
+        const int sampleEnd   = qMin(0x200, peek.size());
+        QSet<quint8> distinct;
+        int nonZero = 0;
+        for (int i = sampleStart; i < sampleEnd; ++i) {
+            const quint8 b = quint8(peek[i]);
+            distinct.insert(b);
+            if (b != 0) ++nonZero;
+        }
+        const int windowSize = sampleEnd - sampleStart;
+        const double nonZeroRatio = windowSize > 0
+            ? double(nonZero) / double(windowSize) : 0.0;
+        const bool highEntropy = (distinct.size() >= 100)
+                              && (nonZeroRatio >= 0.85);
+
+        if (highEntropy) {
+            return fail(QStringLiteral(
+                "This XDF file appears to be encrypted "
+                "(TunerPro RT password-protected). EcuParser cannot "
+                "read encrypted XDFs - the format is closed and "
+                "requires the original password. Open the file in "
+                "TunerPro RT, use 'Save As' to export an unprotected "
+                "copy, then load that copy here."));
+        }
+        return fail(QStringLiteral(
+            "This XDF file is in TunerPro's legacy binary format, "
+            "not the XML format EcuParser supports. Open it in a "
+            "recent version of TunerPro RT and save it as an XML "
+            "XDF (the default for new files), then load that here."));
+    }
 
     QXmlStreamReader xr(&f);
 

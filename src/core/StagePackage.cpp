@@ -190,9 +190,24 @@ QList<QPair<QString, QString>> StagePackage::listAvailable()
             // clearer error later when they try to apply it.
             out.append({n, full});
     }
+    // Sort order: performance stages (Stage 1, Stage 2, ...) first,
+    // economy variants after, anything else alphabetically at the end.
+    // Within each group, alphabetical. The intent is that the most
+    // common picks (performance stages) appear at the top of the
+    // picker so the user doesn't have to scroll past Economy entries
+    // to reach them.
+    auto sortKey = [](const QString &name) -> int {
+        const QString lower = name.toLower();
+        if (lower.startsWith(QStringLiteral("stage")))   return 0;
+        if (lower.startsWith(QStringLiteral("economy"))) return 1;
+        return 2;
+    };
     std::sort(out.begin(), out.end(),
-              [](const QPair<QString,QString> &a,
-                 const QPair<QString,QString> &b) {
+              [&sortKey](const QPair<QString,QString> &a,
+                         const QPair<QString,QString> &b) {
+                  const int ka = sortKey(a.first);
+                  const int kb = sortKey(b.first);
+                  if (ka != kb) return ka < kb;
                   return a.first < b.first;
               });
     return out;

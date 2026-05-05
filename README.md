@@ -53,8 +53,10 @@ Pre-built tune profiles that apply a coordinated set of map edits in one click. 
 
 Each stage exposes optional sub-edits (EGR off, soft rev-limit, highway cruise, etc.) the user can toggle before applying.
 
+**Scope of the shipped stages.** All four stage packages target schema `28F0_100` only — the Bosch EDC15C calibration used in the 1999-2004 Jeep Grand Cherokee WJ 2.7 CRD with the Mercedes-Benz OM612 five-cylinder diesel (163 PS / 400 Nm). Their map names, addresses, value ranges, and the tuning logic itself (torque limiter shape, rail pressure atomisation, cruise-band injection, EGR strategy) are specific to this engine and ECU. Stages cannot be applied to other schemas — when a different driver is loaded the **Apply Stage** button is greyed out and its tooltip explains why. Other schemas (GM PCM 0411, GM E40, etc.) can still browse and edit maps freely, and users can build their own tune packages with the **Custom tune editor** that match the loaded driver's map names.
+
 ### Custom tune editor
-Build a tune inline by adding edits one at a time: pick a map, pick a region (rows/cols), enter a percentage or absolute target, optional cap. Save as JSON and re-apply later or share with another bin.
+Build a tune inline by adding edits one at a time: pick a map, pick a region (rows/cols), enter a percentage or absolute target, optional cap. Save as JSON and re-apply later or share with another bin. Custom tunes are not constrained to a particular schema — the saved JSON declares which schema(s) it applies to, so it shows up in the Apply Stage picker only when a compatible driver is loaded.
 
 ### Stage preview
 Before committing a stage, see exactly which cells will change and by how much. The diff is rendered with the same coloured delta convention as the table editor.
@@ -97,14 +99,36 @@ EcuParser --driver J293_822.drt --bin stock.bin --verify-checksum
 
 ---
 
-## Recent changes (v6 → v7)
+## Recent changes
 
-- All UI strings translated to English; comments cleaned up.
-- Diff summary line now uses coloured HTML chips (amber for torque, pink for power, red/green for fuel) so the headline metrics stand out against the table below.
-- Estimated fuel-consumption projection added to the diff summary using a 5-category weighted model with cruise-zone-aware main injection blending.
+### Schema family and multi-ECU support
+- `BinFile::detectSchema()` now recognises three ECU families:
+  - **Bosch EDC15C 28F0_100** (Jeep WJ 2.7 CRD OM612, 512 KiB)
+  - **GM PCM 0411** (Motorola 68k-based GM trucks/SUVs, 512 KiB) — schema id `GM_0411_OS<n>` where `<n>` is the 8-digit OS number read from offset `0x504`
+  - **GM E40** (PowerPC-based 2003-2005 GTO etc., 1 MiB or 1.25 MiB with slave chip) — schema id `GM_E40_OS<n>` where `<n>` is the 8-digit OS-id ASCII string read from offset `0x1FE9E`
+- Driver auto-pick is now family-aware: a GM E40 bin will accept any driver whose schema id contains a matching 8-digit OS number, even from a different revision (with a non-blocking warning that some addresses can shift between OS revisions).
+
+### Apply Stage scope clarified
+- The shipped stage packages target schema `28F0_100` only. Other schemas grey out the **Apply Stage** button with a tooltip explaining why (custom tunes built via the Custom tune editor still work for any schema).
+
+### Improved error messages
+- Encrypted XDF files (TunerPro RT password-protected) and legacy binary XDFs are now detected up front and produce a specific error pointing the user to the right action ("open in TunerPro RT, save unencrypted, then load that copy") instead of the generic "incorrectly encoded content" message.
+
+### Diff summary
+- Coloured HTML chips for the headline metrics (amber peak torque, pink peak power, red/green fuel use direction).
+- Estimated fuel-consumption projection added using a 5-category weighted model with cruise-zone-aware main injection blending.
 - Torque scale fixed to OM612 reference (400 Nm / 7500 raw, 163 PS @ 4000 rpm) — earlier versions used a placeholder VM Motori reference (295 Nm / 175 PS).
-- 3D surface view: original mesh redrawn as a vivid cyan-blue wireframe (1.6 px stroke, both row and column lines) for clear contrast against the modified surface. 1D maps (torque limiter 19×1) now render as a four-cell-wide ribbon instead of degenerating to a single line.
-- Two new stage packages: Economy (Soft) targeting daily-driver fuel saving with peak torque preserved, and Economy (Hard) targeting aggressive fuel saving with reduced peak torque and dramatically reduced upper-RPM power. Both keep EGR active.
+
+### 3D surface view
+- Original mesh redrawn as a vivid cyan-blue wireframe (1.6 px stroke, both row and column lines) for clear contrast against the modified surface.
+- 1D maps (torque limiter 19×1) now render as a four-cell-wide ribbon instead of degenerating to a single line.
+
+### Stage catalogue
+- Two new stage packages: **Economy (Soft)** targeting daily-driver fuel saving with peak torque preserved, and **Economy (Hard)** targeting aggressive fuel saving with reduced peak torque and dramatically reduced upper-RPM power. Both keep EGR active.
+- Stage picker order: performance stages (Stage 1, Stage 2) appear first, economy variants follow, anything else last — alphabetical within each group.
+
+### Localisation
+- All UI strings are now English; project-specific references removed from comments.
 
 ---
 
