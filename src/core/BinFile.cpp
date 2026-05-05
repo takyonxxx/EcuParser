@@ -157,13 +157,15 @@ bool BinFile::writeBytes(quint32 offset, const QByteArray &bytes)
 QString BinFile::detectSchema() const
 {
     // We support several bin sizes for different ECU families:
-    //   - 512 KiB : Bosch EDC15C (28F0_100), GM PCM 0411 small variant
+    //   - 256 KiB : Chrysler JTEC (early WJ 4.0/4.7, TJ, ZJ V8)
+    //   - 512 KiB : Bosch EDC15C (28F0_100), GM PCM 0411,
+    //               Chrysler JTEC+ (later WJ/TJ)
     //   - 1 MiB   : GM E40 PCM (1MB main, used in 2003-2005 GTO etc.)
     //   - 1.25 MiB: GM E40 PCM with bolt-on slave chip (extra 256 KiB)
     //
     // Reject anything else early.
     const qsizetype sz = m_data.size();
-    if (sz != 524288 && sz != 1048576 && sz != 1310720)
+    if (sz != 262144 && sz != 524288 && sz != 1048576 && sz != 1310720)
         return QString();
 
     auto u16le = [&](quint32 off) -> int {
@@ -249,6 +251,73 @@ QString BinFile::detectSchema() const
         const bool osLooksOk = (osNum >= 12000000 && osNum < 13000000);
         if (stackHi && resetLooksOk && osLooksOk) {
             return QStringLiteral("GM_0411_OS%1").arg(osNum);
+        }
+    }
+
+    // === Chrysler JTEC / JTEC+ detection (256 KiB or 512 KiB) ===
+    //
+    // JTEC ("Jeep & Truck Engine Controller") is the Chrysler/Jeep
+    // PCM used 1996-2004 in many platforms - WJ Grand Cherokee 4.0L
+    // I6 and 4.7L V8, TJ Wrangler, Dakota/Durango, Viper. JTEC+ is
+    // the 1999+ revision (PCI bus). Calibration size is typically
+    // 256 KiB (early JTEC) or 512 KiB (JTEC+ / 2003+).
+    //
+    // Signature heuristics (informal - we don't have a public XDF
+    // for JTEC, so this detection is intentionally conservative;
+    // when uncertain we let the bin fall through and report no
+    // schema, which keeps the user from getting a false positive):
+    //   - Vector table at 0x0000 follows Motorola 68k conventions
+    //     (MC68HC16Z2 CPU, big-endian). Same shape as GM 0411 -
+    //     stack high word 0x00FF, reset PC in the lower 1 MiB.
+    //   - GM-style OS number at 0x504 is ABSENT (we already returned
+    //     GM_0411_OS<n> if that field looked like a GM OS).
+    //   - Calibration part number is a 10-character ASCII string of
+    //     the form "5604xxxxxx" (Chrysler service number prefix
+    //     56044xxxxx for WJ/TJ/Dakota PCMs). We scan a window in
+    //     the upper half of the bin for this pattern - the exact
+    //     offset varies by OS revision.
+    //
+    // We deliberately do NOT try to read maps from a JTEC bin
+    // without a driver: the public information about JTEC map
+    // addresses is sparse and inconsistent across revisions, and
+    // shipping wrong addresses is worse than reporting "unknown".
+    // Schema id format: "Chrysler_JTEC_<partno>" so the user can
+    // see the exact OS at the top of the window.
+    if (sz == 524288 || sz == 262144) {
+        const quint8 b0 = quint8(m_data.at(0));
+        const quint8 b1 = quint8(m_data.at(1));
+        const bool stackHi = (b0 == 0x00 && b1 == 0xFF);
+        const quint32 reset = u32be(0x0004);
+        const bool resetLooksOk = (reset >= 0x00000400 && reset < 0x00080000);
+        // Scan for "5604" prefix followed by 6 alphanumerics inside
+        // the calibration block area. JTEC stores its part number
+        // multiple times - we just need one hit to confirm. Window
+        // 0x10000..end skips the early code+vector area and stays
+        // in calibration territory.
+        QString partNum;
+        const qsizetype scanStart = 0x10000;
+        const qsizetype scanEnd   = m_data.size() - 10;
+        for (qsizetype i = scanStart; i < scanEnd; ++i) {
+            if (m_data.at(i)     != '5') continue;
+            if (m_data.at(i + 1) != '6') continue;
+            if (m_data.at(i + 2) != '0') continue;
+            if (m_data.at(i + 3) != '4') continue;
+            // Next 6 chars must be ASCII alphanumeric
+            bool ok = true;
+            for (int k = 4; k < 10; ++k) {
+                const quint8 c = quint8(m_data.at(i + k));
+                const bool isDigit = (c >= '0' && c <= '9');
+                const bool isUpper = (c >= 'A' && c <= 'Z');
+                if (!isDigit && !isUpper) { ok = false; break; }
+            }
+            if (ok) {
+                partNum = QString::fromLatin1(
+                    m_data.constData() + i, 10);
+                break;
+            }
+        }
+        if (stackHi && resetLooksOk && !partNum.isEmpty()) {
+            return QStringLiteral("Chrysler_JTEC_%1").arg(partNum);
         }
     }
 

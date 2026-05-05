@@ -437,6 +437,17 @@ bool MainWindow::loadOriginalBin(const QString &path)
             const QRegularExpression re(QStringLiteral("\\b(12\\d{6})\\b"));
             return re.match(driverSchema).hasMatch();
         }
+        // Chrysler JTEC heuristic: bin schema "Chrysler_JTEC_<partno>"
+        // is compatible with any driver schema whose id contains the
+        // Chrysler service-number prefix "5604" followed by 6 chars.
+        // Cross-OS JTEC drivers are even less reliable than cross-OS
+        // GM drivers (the calibration layout reorganises between
+        // service revisions) but the user can still browse and edit
+        // - we just hint that values may be wrong.
+        if (binSchema.startsWith(QStringLiteral("Chrysler_JTEC_"))) {
+            const QRegularExpression re(QStringLiteral("\\b(5604[0-9A-Z]{6})\\b"));
+            return re.match(driverSchema).hasMatch();
+        }
         return false;
     };
 
@@ -471,30 +482,39 @@ bool MainWindow::loadOriginalBin(const QString &path)
             const int idx = m_driverCombo->findData(matching.first());
             if (idx >= 0) m_driverCombo->setCurrentIndex(idx);
 
-            // For GM family bins (0411 or E40) with a cross-OS driver
-            // match, warn about address shift. The driver might come
-            // from a different OS revision than the bin (e.g. driver
-            // 12587604 + bin 12216125). Map definitions are still
-            // useful but some addresses will be wrong - the user
-            // should verify before relying on edits.
-            const bool isGmFamily =
+            // For cross-revision driver matches in any of the
+            // multi-revision families (GM 0411, GM E40, Chrysler
+            // JTEC), warn about possible address shifts. The driver
+            // may come from a different OS / part number than the
+            // bin. Map definitions are still useful but some
+            // addresses will be wrong - the user should verify
+            // before relying on edits.
+            const bool isMultiRevFamily =
                 detected.startsWith(QStringLiteral("GM_0411"))
-             || detected.startsWith(QStringLiteral("GM_E40"));
-            if (isGmFamily
+             || detected.startsWith(QStringLiteral("GM_E40"))
+             || detected.startsWith(QStringLiteral("Chrysler_JTEC_"));
+            if (isMultiRevFamily
                 && m_driver
                 && m_driver->schemaId != detected) {
+                const QString familyName =
+                    detected.startsWith(QStringLiteral("Chrysler_JTEC_"))
+                        ? QStringLiteral("Chrysler JTEC")
+                        : (detected.startsWith(QStringLiteral("GM_E40"))
+                            ? QStringLiteral("GM E40")
+                            : QStringLiteral("GM PCM 0411"));
                 QMessageBox::information(this,
                     QStringLiteral("Driver loaded"),
                     QStringLiteral(
                         "Loaded driver '%1' (schema %2) for a bin from "
-                        "a different OS revision (%3). Both belong to "
-                        "the same GM PCM family so most map definitions "
-                        "should be useful, but some map addresses can "
-                        "shift between OS revisions - verify map values "
-                        "look reasonable before saving edits.")
+                        "a different revision (%3). Both belong to "
+                        "the %4 family so most map definitions should "
+                        "be useful, but some map addresses can shift "
+                        "between revisions - verify map values look "
+                        "reasonable before saving edits.")
                         .arg(QFileInfo(matching.first()).fileName(),
                              m_driver->schemaId,
-                             detected));
+                             detected,
+                             familyName));
             }
             statusBar()->showMessage(
                 QStringLiteral("Auto-loaded driver %1 (schema %2 detected)")
@@ -524,8 +544,24 @@ bool MainWindow::loadOriginalBin(const QString &path)
                     "EcuParser ships drivers for Bosch EDC15C 28F0_100 "
                     "only. To work with this bin, supply a compatible "
                     "XML XDF or DRT defining its maps and load it from "
-                    "the Driver combo.")
+                    "the Driver combo. Community XDFs are available "
+                    "from PCMHacking / LS1Tech / GearheadEFI forums.")
                     .arg(family, detected);
+            } else if (detected.startsWith(QStringLiteral("Chrysler_JTEC_"))) {
+                familyHint = QStringLiteral(
+                    "This bin appears to be a Chrysler JTEC PCM "
+                    "calibration (%1). EcuParser detects the part "
+                    "number but does not ship a JTEC driver - "
+                    "publicly available XDFs for JTEC are scarce and "
+                    "fragmented across Chrysler service revisions. "
+                    "To work with this bin you'll need to supply your "
+                    "own XML XDF or DRT (try forums.jeepforum.com, "
+                    "jeepstrokers.com, or commercial tuners like FRP "
+                    "Tuning, Syked, B&G). Note: JTEC tunes are "
+                    "unrelated to the Stage 1 / Stage 2 packages we "
+                    "ship - those are diesel-specific and don't apply "
+                    "to gasoline JTEC platforms.")
+                    .arg(detected);
             } else {
                 familyHint = QStringLiteral(
                     "Schema %1 detected, but no shipped driver matches. "
