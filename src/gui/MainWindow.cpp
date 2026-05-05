@@ -1225,7 +1225,7 @@ void MainWindow::onExportModifiedBin()
     QString suggested;
     const QString basisPath = m_modBinPath.isEmpty() ? QString() : m_modBinPath;
     if (basisPath.isEmpty()) {
-        suggested = AppPaths::dataDir();
+        suggested = AppPaths::binsDir();
         if (!suggested.isEmpty())
             suggested += QStringLiteral("/modified.bin");
     } else {
@@ -1263,7 +1263,7 @@ void MainWindow::onExportModifiedBin()
 void MainWindow::onBrowseDriver()
 {
     const QString p = QFileDialog::getOpenFileName(
-        this, QStringLiteral("Open driver"), AppPaths::dataDir(),
+        this, QStringLiteral("Open driver"), AppPaths::driversDir(),
         QStringLiteral("Driver files (*.drt *.xdf);;DRT files (*.drt);;TunerPro XDF (*.xdf);;All files (*)"));
     if (p.isEmpty()) return;
     if (!loadDriver(p)) return;
@@ -1280,7 +1280,7 @@ void MainWindow::onBrowseDriver()
 void MainWindow::onBrowseOriginalBin()
 {
     const QString p = QFileDialog::getOpenFileName(
-        this, QStringLiteral("Open original bin"), AppPaths::dataDir(),
+        this, QStringLiteral("Open original bin"), AppPaths::binsDir(),
         QStringLiteral("Bin files (*.bin);;All files (*)"));
     if (p.isEmpty()) return;
     if (!loadOriginalBin(p)) return;
@@ -1297,7 +1297,7 @@ void MainWindow::onBrowseOriginalBin()
 void MainWindow::onBrowseModifiedBin()
 {
     const QString p = QFileDialog::getOpenFileName(
-        this, QStringLiteral("Open modified bin"), AppPaths::dataDir(),
+        this, QStringLiteral("Open modified bin"), AppPaths::binsDir(),
         QStringLiteral("Bin files (*.bin);;All files (*)"));
     if (p.isEmpty()) return;
     if (!loadModifiedBin(p)) return;

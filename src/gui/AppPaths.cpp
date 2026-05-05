@@ -76,50 +76,95 @@ QString AppPaths::dataDir()
     return QString();
 }
 
+QString AppPaths::binsDir()
+{
+    const QString base = dataDir();
+    if (base.isEmpty())
+        return QString();
+    const QString sub = base + QStringLiteral("/bin");
+    if (QFileInfo(sub).isDir())
+        return QDir(sub).absolutePath();
+    // Backwards-compat: project layouts that pre-date the bin/ subdir
+    // had .bin files at the root of data/. Fall back to that so old
+    // checkouts still work.
+    return base;
+}
+
+QString AppPaths::driversDir()
+{
+    const QString base = dataDir();
+    if (base.isEmpty())
+        return QString();
+    const QString sub = base + QStringLiteral("/drivers");
+    if (QFileInfo(sub).isDir())
+        return QDir(sub).absolutePath();
+    return base;
+}
+
 QStringList AppPaths::listDrivers()
 {
-    const QString dir = dataDir();
-    if (dir.isEmpty())
+    const QString base = dataDir();
+    if (base.isEmpty())
         return {};
-    QDir d(dir);
-    // Both DRT (our reverse-engineered format) and XDF (TunerPro's
-    // open format) describe the same thing - cell addresses, dims,
-    // and axes - so list them together. Recurse into a "xdf/" subdir
-    // when present so users can keep many community-contributed XDFs
-    // alongside the small handful of DRTs.
+
+    // Canonical layout is data/drivers/ holding both .drt (our
+    // reverse-engineered format) and .xdf (TunerPro's open format)
+    // since they describe the same thing - cell addresses, dims, and
+    // axes. Older checkouts kept .drt at the root of data/ and .xdf in
+    // data/xdf/, so probe all three locations and merge the results.
     const QStringList patterns {
         QStringLiteral("*.drt"),
         QStringLiteral("*.xdf"),
     };
     QStringList out;
-    QStringList names = d.entryList(patterns,
-                                    QDir::Files | QDir::Readable, QDir::Name);
-    for (const QString &n : names)
-        out.append(d.absoluteFilePath(n));
 
-    QDir xdfDir(dir + QStringLiteral("/xdf"));
-    if (xdfDir.exists()) {
-        QStringList xdfNames = xdfDir.entryList(
-            QStringList() << QStringLiteral("*.xdf"),
-            QDir::Files | QDir::Readable, QDir::Name);
-        for (const QString &n : xdfNames)
-            out.append(xdfDir.absoluteFilePath(n));
-    }
+    auto appendFrom = [&](const QString &dirPath) {
+        QDir d(dirPath);
+        if (!d.exists())
+            return;
+        const QStringList names = d.entryList(
+            patterns, QDir::Files | QDir::Readable, QDir::Name);
+        for (const QString &n : names) {
+            const QString full = d.absoluteFilePath(n);
+            // Avoid duplicates if both legacy and new layouts contain
+            // the same filename.
+            if (!out.contains(full))
+                out.append(full);
+        }
+    };
+
+    // Preferred layout first so canonical copies sort to the top.
+    appendFrom(base + QStringLiteral("/drivers"));
+    // Legacy fallbacks.
+    appendFrom(base);
+    appendFrom(base + QStringLiteral("/xdf"));
     return out;
 }
 
 QStringList AppPaths::listBins()
 {
-    const QString dir = dataDir();
-    if (dir.isEmpty())
+    const QString base = dataDir();
+    if (base.isEmpty())
         return {};
-    QDir d(dir);
-    QStringList names = d.entryList(QStringList() << QStringLiteral("*.bin"),
-                                    QDir::Files | QDir::Readable, QDir::Name);
+
     QStringList out;
-    out.reserve(names.size());
-    for (const QString &n : names)
-        out.append(d.absoluteFilePath(n));
+    auto appendFrom = [&](const QString &dirPath) {
+        QDir d(dirPath);
+        if (!d.exists())
+            return;
+        const QStringList names = d.entryList(
+            QStringList() << QStringLiteral("*.bin"),
+            QDir::Files | QDir::Readable, QDir::Name);
+        for (const QString &n : names) {
+            const QString full = d.absoluteFilePath(n);
+            if (!out.contains(full))
+                out.append(full);
+        }
+    };
+
+    // Canonical layout: data/bin/. Legacy: bins at the root of data/.
+    appendFrom(base + QStringLiteral("/bin"));
+    appendFrom(base);
     return out;
 }
 

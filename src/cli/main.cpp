@@ -137,11 +137,26 @@ int main(int argc, char *argv[])
     if (drtPath.isEmpty()) {
         const QString dataDir = findDataDir();
         if (!dataDir.isEmpty()) {
-            const QString defDrt = dataDir + QStringLiteral("/J293_822.drt");
-            const QString defBin = dataDir + QStringLiteral("/293-822.bin");
-            if (QFileInfo(defDrt).isFile()) {
+            // Canonical layout puts drivers under data/drivers/ and bins
+            // under data/bin/, with the legacy flat layout (everything
+            // at the root of data/) as a fallback for old checkouts.
+            auto firstExisting = [](const QStringList &candidates) {
+                for (const QString &c : candidates)
+                    if (QFileInfo(c).isFile())
+                        return c;
+                return QString();
+            };
+            const QString defDrt = firstExisting({
+                dataDir + QStringLiteral("/drivers/J293_822.drt"),
+                dataDir + QStringLiteral("/J293_822.drt"),
+            });
+            const QString defBin = firstExisting({
+                dataDir + QStringLiteral("/bin/293-822.bin"),
+                dataDir + QStringLiteral("/293-822.bin"),
+            });
+            if (!defDrt.isEmpty()) {
                 drtPath = defDrt;
-                if (binPath.isEmpty() && QFileInfo(defBin).isFile())
+                if (binPath.isEmpty() && !defBin.isEmpty())
                     binPath = defBin;
                 wantDump = true;
                 out << "No --drt given, using bundled test data:\n";

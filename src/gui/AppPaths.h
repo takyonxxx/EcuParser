@@ -16,10 +16,25 @@ public:
     // not found. Cached after first call.
     static QString dataDir();
 
-    // Returns absolute paths to all .drt files in data/. Empty list if none.
+    // Returns the absolute path to the data/bin/ directory if it exists,
+    // otherwise falls back to dataDir(). Used as the suggested directory
+    // for bin file open dialogs.
+    static QString binsDir();
+
+    // Returns the absolute path to the data/drivers/ directory if it
+    // exists, otherwise falls back to dataDir(). Used as the suggested
+    // directory for driver file open dialogs.
+    static QString driversDir();
+
+    // Returns absolute paths to all .drt and .xdf files under
+    // data/drivers/ (the canonical layout). For backwards compatibility
+    // with old installs we also pick up .drt/.xdf left at the root of
+    // data/ and inside data/xdf/.
     static QStringList listDrivers();
 
-    // Returns absolute paths to all .bin files in data/. Empty list if none.
+    // Returns absolute paths to all .bin files under data/bin/ (the
+    // canonical layout). For backwards compatibility with old installs
+    // we also pick up .bin files left at the root of data/.
     static QStringList listBins();
 };
 
