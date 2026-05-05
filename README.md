@@ -6,6 +6,35 @@ EcuParser parses calibration drivers (`.drt` and `.xdf` formats), reads and edit
 
 ---
 
+## Supported ECUs
+
+EcuParser autodetects the ECU family from the bin signature and decides which driver(s) it can use. Four families are recognised today:
+
+| Family | ECU | Bin size | Schema id | Status |
+|---|---|---|---|---|
+| **Jeep WJ 2.7 CRD** (1999-2004 Grand Cherokee, Mercedes OM612 5-cyl diesel, Avrupa) | Bosch EDC15C | 512 KiB | `28F0_100` | ✓ Full driver shipped (`data/xdf/28F0_100.xdf`); maps named, units calibrated, stage packages applicable |
+| **GM PCM 0411** (2002+ GM trucks/SUVs, LM4/LM7/LQ4 V8) | Motorola 68k | 512 KiB | `GM_0411_OS<n>` | ⚠ Detected and named; bring your own driver (XML XDF or DRT). No shipped stages. |
+| **GM E40 PCM** (2003-2005 GTO, CTS-V, etc.) | PowerPC | 1 / 1.25 MiB | `GM_E40_OS<n>` | ⚠ Detected and named; bring your own driver. Phoenix XDFs (community-distributed) work. No shipped stages. |
+| **Chrysler JTEC / JTEC+** (1996-2004 WJ 4.0L/4.7L benzin, TJ Wrangler, Dakota, Durango, Viper) | MC68HC16Z2 | 256 / 512 KiB | `Chrysler_JTEC_<partno>` | ⚠ Detected via 10-char part-number scan (`5604xxxxxx`); bring your own driver. Public JTEC XDFs are scarce - try jeepforum.com, jeepstrokers.com, or commercial tuners (FRP, Syked, B&G). No shipped stages. |
+
+Where `<n>` is the 8-digit GM OS number and `<partno>` is the Chrysler service part number, both read directly from the bin.
+
+### What about other Jeep WJ variants?
+
+The shipped driver covers **only the WJ 2.7 CRD diesel** (Mercedes OM612 engine, sold mostly in European markets). Other WJ trims use entirely different ECUs:
+
+| Trim | ECU | Status |
+|---|---|---|
+| WJ 2.7 CRD (OM612, Avrupa) | Bosch EDC15C | ✓ Full support, schema `28F0_100` |
+| WJ 4.0L I6 benzin | Chrysler JTEC / JTEC+ | ⚠ Bin auto-detected (`Chrysler_JTEC_56044xxxxx`), but you must supply a driver yourself - public XDFs are scarce |
+| WJ 4.7L V8 benzin | Chrysler JTEC | ⚠ Same as 4.0L: detected, no shipped driver |
+| WJ 4.7L V8 HO (2002+) | Chrysler NGC | ✗ Not detected - bin format differs from JTEC |
+| WJ 3.1L TD (early VM Motori R425/R428) | Bosch EDC (different schema) | ✗ Not supported - farklı motor (295 Nm/175 PS), farklı kalibrasyon |
+
+The three sub-revisions of the WJ 2.7 CRD calibration (`J293_822`, `J094_704`, `J409_438`) all share schema `28F0_100` and the same map addresses, so a single driver covers all of them. The differences between sub-revisions live in the **code region** of the ECU image (bytes outside the calibration table), which EcuParser doesn't try to interpret.
+
+---
+
 ## Capabilities
 
 ### Driver parsing
