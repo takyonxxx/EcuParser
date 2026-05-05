@@ -1,48 +1,75 @@
 {
   "name": "Stage 1",
-  "description": "Conservative tune. ~+15-18% torque, drivability-friendly. Lifts injection, rail pressure and torque limiter at higher RPM/load only. Compatible with stock turbo and stock injectors.",
-  "schemas": ["28F0_100"],
+  "description": "Factory-recommended tune at Black Pearl/Overland HO level (~+12.5% torque, ~+25% power; equivalent to 450 Nm / 204 PS). Mechanically identical to stock - same turbo, injectors and rail pump - tuned within Mercedes-validated parameters. Hardware-safe for daily and long-distance use.",
+  "schemas": [
+    "28F0_100"
+  ],
   "edits": [
+    {
+      "map": "torque limiter",
+      "pct": 20,
+      "row_min": 4,
+      "row_max": 8,
+      "max_value": 8500,
+      "comment": "Peak torque band (1700-2500 rpm). Targets 8500 raw cap (~453 Nm) - matches Mercedes Black Pearl HO peak torque (450 Nm). Cells 4-7 already saturate, cell 8 lifts to 8040."
+    },
+    {
+      "map": "torque limiter",
+      "pct": 13,
+      "row_min": 9,
+      "row_max": 12,
+      "comment": "Mid-upper RPM (2700-3300 rpm). +13% on shoulder of torque curve; helps mid-RPM acceleration without overstressing turbo."
+    },
+    {
+      "map": "torque limiter",
+      "pct": 10,
+      "row_min": 13,
+      "row_max": 16,
+      "comment": "Upper RPM (3500-4100 rpm). +10% only - real torque here is set by injection/turbo maps; limiter only sets the ceiling."
+    },
+    {
+      "map": "torque limiter",
+      "pct": 5,
+      "row_min": 17,
+      "row_max": 17,
+      "comment": "Pre-rev-limit (4300 rpm). +5% gentle lift. Cell 18 (rev-limit) untouched - keeps factory rev limiter at 4500."
+    },
+    {
+      "map": "turbo pressure",
+      "pct": 10,
+      "row_min": 4,
+      "row_max": 9,
+      "col_min": 6,
+      "col_max": 11,
+      "max_value": 2400,
+      "comment": "+10% boost target at mid-RPM x mid-high load (rows 4-9, cols 6-11). Cap 2400 mbar absolute (~1.4 bar relative) to protect Garrett GT2052V from overspeed at high RPM."
+    },
+    {
+      "map": "rail pressure",
+      "pct": 12,
+      "row_min": 4,
+      "col_min": 9,
+      "max_value": 13800,
+      "comment": "+12% rail pressure at mid-high RPM x high load (rows 4..15, cols 9..15). Cap 13800 raw (~1380 bar) keeps within stock CP1 pump and injector spray-in window."
+    },
     {
       "map": "injection at part throttle",
       "pct": 18,
       "row_min": 7,
-      "col_min": 11,
-      "comment": "+18% main fueling at high RPM x high load (rows 7..15 x cols 11..15)."
-    },
-    {
-      "map": "rail pressure",
-      "pct": 11,
-      "row_min": 4,
       "col_min": 10,
-      "max_value": 26000,
-      "comment": "+11% rail pressure at mid-high RPM x high load. Capped to keep within injector spray-in window."
+      "comment": "+18% main fueling at high RPM x high load (rows 7..15, cols 10..15). Stock injectors handle this comfortably; combined with the boost lift gives the +25% power."
     },
     {
       "map": "fuel during acceleration",
-      "pct": 7,
-      "col_min": 8,
-      "comment": "+7% transient fueling at high load - improves throttle response."
+      "pct": 10,
+      "col_min": 7,
+      "comment": "+10% transient fueling at high load. Improves throttle response and reduces lag - feels like a HO."
     },
     {
       "map": "fuel during acceleration (Map 2)",
       "pct": 14,
       "col_min": 8,
-      "comment": "+14% on the secondary acceleration map."
-    },
-    {
-      "map": "turbo pressure",
-      "pct": 5,
-      "row_min": 4,
-      "col_min": 6,
-      "comment": "+5% boost target at mid RPM x mid-high load. Conservative to avoid overspeeding the stock turbo."
-    },
-    {
-      "map": "torque limiter",
-      "pct": 13,
-      "row_min": 4,
-      "max_value": 9000,
-      "comment": "+13% torque limit ceiling at mid-to-high RPM (rows 4..15), capped at 9000."
+      "comment": "+14% on the secondary acceleration map; matches main acceleration map ratio for consistency."
     }
   ],
   "options": [

@@ -8,13 +8,17 @@
 #include <QBrush>
 #include <QColor>
 #include <QFont>
+#include <QHash>
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 #include <algorithm>
+#include <climits>
+#include <cmath>
 
 namespace EcuParser {
 
@@ -203,8 +207,14 @@ void MapTableWidget::showMap(const BinFile *originalBin,
     }
 
     const QString humanName = DriverNames::displayName(schemaId, *map);
+    const QString unitTitleSuffix = map->unit.isEmpty()
+        ? QString()
+        : QStringLiteral("  |  unit: %1 (raw * %2 + %3)")
+              .arg(map->unit,
+                   QString::number(map->scale, 'g', 4),
+                   QString::number(map->offset, 'g', 4));
     m_titleLabel->setText(
-        QStringLiteral("%1  |  %2 x %3  |  @ 0x%4%5")
+        QStringLiteral("%1  |  %2 x %3  |  @ 0x%4%5%6")
             .arg(humanName)
             .arg(DriverNames::effectiveDimX(schemaId, *map))
             .arg(DriverNames::effectiveDimY(schemaId, *map))
@@ -212,7 +222,8 @@ void MapTableWidget::showMap(const BinFile *originalBin,
             .arg(effInstances > 1
                      ? QStringLiteral("  (instance %1/%2)")
                            .arg(instanceIndex + 1).arg(effInstances)
-                     : QString()));
+                     : QString())
+            .arg(unitTitleSuffix));
 
     // === Read both bins with override-aware dimensions ===
     MapData modData = readMapInstance(*primary, *map, instanceIndex,
@@ -324,6 +335,15 @@ void MapTableWidget::showMap(const BinFile *originalBin,
 
     // === Fill cells - the reference tool style: light background, only diffs are tinted.
     int diffCount = 0;
+    // Resolve physical-unit conversion once. When unit is empty,
+    // hasUnit() is false and we skip every per-cell unit conversion.
+    const double unitScale  = (m_currentMap ? m_currentMap->scale : 1.0);
+    const double unitOffset = (m_currentMap ? m_currentMap->offset : 0.0);
+    const QString unitText  = (m_currentMap ? m_currentMap->unit : QString());
+    const bool hasUnit = !unitText.isEmpty();
+    auto toPhysical = [&](qint64 raw) -> double {
+        return double(raw) * unitScale + unitOffset;
+    };
     for (int r = 0; r < rowCount; ++r) {
         for (int c = 0; c < colCount; ++c) {
             // MapData stores cells row-major with the BIN stride
@@ -350,10 +370,26 @@ void MapTableWidget::showMap(const BinFile *originalBin,
                     ++diffCount;
                     bg = (v > ov) ? palette::kIncreasedTint : palette::kDecreasedTint;
                     fg = palette::kChangedText;
+                    if (hasUnit) {
+                        item->setToolTip(
+                            QStringLiteral("Original: %1 (%2 %3)\nModified: %4 (%5 %6)\nDelta: %7")
+                                .arg(ov).arg(QString::number(toPhysical(ov), 'f', 2), unitText)
+                                .arg(v).arg(QString::number(toPhysical(v), 'f', 2), unitText)
+                                .arg(qint64(v) - qint64(ov)));
+                    } else {
+                        item->setToolTip(
+                            QStringLiteral("Original: %1\nModified: %2\nDelta: %3")
+                                .arg(ov).arg(v).arg(qint64(v) - qint64(ov)));
+                    }
+                } else if (hasUnit) {
                     item->setToolTip(
-                        QStringLiteral("Original: %1\nModified: %2\nDelta: %3")
-                            .arg(ov).arg(v).arg(qint64(v) - qint64(ov)));
+                        QStringLiteral("%1 = %2 %3")
+                            .arg(v).arg(QString::number(toPhysical(v), 'f', 2), unitText));
                 }
+            } else if (hasUnit) {
+                item->setToolTip(
+                    QStringLiteral("%1 = %2 %3")
+                        .arg(v).arg(QString::number(toPhysical(v), 'f', 2), unitText));
             }
             item->setBackground(QBrush(bg));
             item->setForeground(QBrush(fg));
@@ -394,11 +430,23 @@ void MapTableWidget::showMap(const BinFile *originalBin,
         diffSummary = QStringLiteral("   diff cells: %1/%2")
                           .arg(diffCount).arg(modData.cells.size());
     }
+    // When a physical unit is defined for this map, append a parenthetic
+    // showing min/max/mean in real-world units. Editing remains raw u16,
+    // but the user sees what 7500 -> 400 Nm means alongside the raw count.
+    QString unitSuffix;
+    if (hasUnit && !modData.cells.isEmpty()) {
+        unitSuffix = QStringLiteral("   (%1..%2 %3, mean %4)")
+                         .arg(QString::number(toPhysical(modData.minValue()), 'f', 2),
+                              QString::number(toPhysical(modData.maxValue()), 'f', 2),
+                              unitText,
+                              QString::number(toPhysical(qint64(modData.meanValue())), 'f', 2));
+    }
     m_statusLabel->setText(
-        QStringLiteral("min=%1   max=%2   mean=%3   cells=%4%5")
+        QStringLiteral("min=%1   max=%2   mean=%3   cells=%4%5%6")
             .arg(modData.minValue()).arg(modData.maxValue())
             .arg(QString::number(modData.meanValue(), 'f', 1))
             .arg(modData.cells.size())
+            .arg(unitSuffix)
             .arg(diffSummary));
 
     m_suppressEdits = false;
@@ -464,53 +512,167 @@ void MapTableWidget::onTableContextMenu(const QPoint &pos)
     QMenu menu(this);
     QAction *setAct = menu.addAction(
         QStringLiteral("Set value for %1 cells...").arg(selected.size()));
+    QAction *smoothAct = menu.addAction(
+        QStringLiteral("Smooth %1 cells (3x3 blur)...").arg(selected.size()));
+    QAction *rampAct = menu.addAction(
+        QStringLiteral("Linear ramp from boundary..."));
     QAction *chosen = menu.exec(m_table->viewport()->mapToGlobal(pos));
-    if (chosen != setAct)
-        return;
+    if (!chosen) return;
 
-    // Use the first selected item's value as the dialog's initial value
-    // so the user can tweak by a small delta rather than retyping.
-    bool numOk = false;
-    const int seed = selected.first()->text().toInt(&numOk);
-    bool ok = false;
-    const int v = QInputDialog::getInt(
-        this, QStringLiteral("Set value for selection"),
-        QStringLiteral("New value (0..65535) for %1 selected cells:")
-            .arg(selected.size()),
-        numOk ? seed : 0, 0, 65535, 1, &ok);
-    if (!ok)
-        return;
-
-    // Snapshot the (row, col) pairs BEFORE we touch anything. We must
-    // not hold on to the QTableWidgetItem pointers across the loop:
-    // the parent reacts to cellEdited by repopulating the table, which
-    // invalidates every item pointer. Indices are stable.
-    QVector<QPair<int,int>> coords;
-    coords.reserve(selected.size());
-    for (QTableWidgetItem *it : selected)
-        coords.append({it->row(), it->column()});
-
-    // Tell the parent we're starting a bulk edit so it can defer the
-    // single refresh to the end. Without this, every cellEdited would
-    // trigger a full refreshCurrentMap() that rebuilds the table and
-    // invalidates the iterators we depend on.
-    emit bulkEditBegin();
-
-    // Drive the writes purely through cellEdited - the parent writes
-    // each value to the bin file but skips the refresh. We don't touch
-    // QTableWidgetItem* directly here, so even if the parent decided
-    // to repopulate the table mid-loop (it shouldn't, but defensively),
-    // we'd survive.
-    m_suppressEdits = true;
-    for (const auto &rc : coords) {
-        emit cellEdited(m_currentMap, m_currentInstance,
-                        rc.first, rc.second, v);
+    // Snapshot the (row, col) pairs and current values BEFORE we touch
+    // anything. We must not hold on to QTableWidgetItem pointers across
+    // the loop: the parent reacts to cellEdited by repopulating the
+    // table, which invalidates every item pointer. Indices are stable.
+    struct CellSnap { int row; int col; int oldValue; };
+    QVector<CellSnap> snaps;
+    snaps.reserve(selected.size());
+    int rowMin = INT_MAX, rowMax = INT_MIN, colMin = INT_MAX, colMax = INT_MIN;
+    for (QTableWidgetItem *it : selected) {
+        bool ok = false;
+        const int v = it->text().toInt(&ok);
+        snaps.append({it->row(), it->column(), ok ? v : 0});
+        rowMin = std::min(rowMin, it->row());
+        rowMax = std::max(rowMax, it->row());
+        colMin = std::min(colMin, it->column());
+        colMax = std::max(colMax, it->column());
     }
-    m_suppressEdits = false;
 
-    // End of bulk: parent now does one refresh, which will repaint with
-    // the new diff highlights, status bar counts, etc.
-    emit bulkEditEnd();
+    if (chosen == setAct) {
+        // === Set value: simple constant write to every selected cell ===
+        // Use the first selected item's value as the dialog's initial value
+        // so the user can tweak by a small delta rather than retyping.
+        bool ok = false;
+        const int v = QInputDialog::getInt(
+            this, QStringLiteral("Set value for selection"),
+            QStringLiteral("New value (0..65535) for %1 selected cells:")
+                .arg(selected.size()),
+            snaps.first().oldValue, 0, 65535, 1, &ok);
+        if (!ok) return;
+
+        emit bulkEditBegin();
+        m_suppressEdits = true;
+        for (const auto &s : snaps) {
+            emit cellEdited(m_currentMap, m_currentInstance,
+                            s.row, s.col, v);
+        }
+        m_suppressEdits = false;
+        emit bulkEditEnd();
+        return;
+    }
+
+    if (chosen == smoothAct) {
+        // === 3x3 average blur, weighted by user-chosen strength ===
+        // For each selected cell, the new value is:
+        //   v_new = round(strength% * mean_3x3 + (1-strength%) * v_old)
+        // Where mean_3x3 averages the cell + its 8 neighbours, clamped
+        // to selection bounds. This removes "step edges" that stage
+        // applies introduce on row_min boundaries (e.g. Stage 1's
+        // injection map jumping from 0% to +18% between row 6 and 7).
+        bool ok = false;
+        const int strength = QInputDialog::getInt(
+            this, QStringLiteral("Smooth selection"),
+            QStringLiteral("Blur strength %% (0 = no change, 100 = pure 3x3 mean):"),
+            50, 0, 100, 5, &ok);
+        if (!ok || strength <= 0) return;
+
+        // Build a position->oldValue lookup for the selection so the
+        // 3x3 mean only averages over selected cells (cells outside the
+        // selection are excluded - keeps the smoothing scoped).
+        QHash<qint64, int> selValueAt;
+        auto key = [](int r, int c) -> qint64 {
+            return (qint64(r) << 32) | quint32(c);
+        };
+        for (const auto &s : snaps)
+            selValueAt.insert(key(s.row, s.col), s.oldValue);
+
+        const double w = strength / 100.0;
+        emit bulkEditBegin();
+        m_suppressEdits = true;
+        for (const auto &s : snaps) {
+            qint64 sum = 0;
+            int cnt = 0;
+            for (int dr = -1; dr <= 1; ++dr) {
+                for (int dc = -1; dc <= 1; ++dc) {
+                    auto it = selValueAt.constFind(key(s.row + dr, s.col + dc));
+                    if (it != selValueAt.constEnd()) {
+                        sum += it.value();
+                        ++cnt;
+                    }
+                }
+            }
+            const double mean = (cnt > 0) ? double(sum) / double(cnt) : s.oldValue;
+            const int newV = int(std::round(w * mean + (1.0 - w) * s.oldValue));
+            emit cellEdited(m_currentMap, m_currentInstance,
+                            s.row, s.col, std::clamp(newV, 0, 65535));
+        }
+        m_suppressEdits = false;
+        emit bulkEditEnd();
+        return;
+    }
+
+    if (chosen == rampAct) {
+        // === Linear ramp from boundary cell to interior ===
+        // For each ROW in the selection, interpolate linearly from the
+        // cell just OUTSIDE the selection's left edge (col = colMin-1)
+        // to the cell at the selection's right edge (col = colMax). If
+        // the left boundary is not present (selection touches col 0),
+        // we ramp instead from selection right boundary out to
+        // colMax+1. This is what tuners want when stage 1/2 created a
+        // jump on a single column boundary - smooth across N cells.
+        const bool haveLeftBoundary  = (colMin > 0);
+        const bool haveRightBoundary = (colMax < m_table->columnCount() - 1);
+        if (!haveLeftBoundary && !haveRightBoundary) {
+            QMessageBox::information(
+                this, QStringLiteral("Ramp"),
+                QStringLiteral("Selection spans the full column range -\n"
+                               "no boundary cell available to ramp from."));
+            return;
+        }
+
+        // Read the boundary values (one per selected row) once, BEFORE
+        // we start emitting edits (which would refresh the table from
+        // under us in the non-bulk case).
+        struct BoundaryVals { int row; int leftV; int rightV; };
+        QVector<BoundaryVals> bvs;
+        bvs.reserve(rowMax - rowMin + 1);
+        for (int r = rowMin; r <= rowMax; ++r) {
+            int leftV = 0, rightV = 0;
+            if (haveLeftBoundary) {
+                if (auto *it = m_table->item(r, colMin - 1))
+                    leftV = it->text().toInt();
+            }
+            if (haveRightBoundary) {
+                if (auto *it = m_table->item(r, colMax + 1))
+                    rightV = it->text().toInt();
+            }
+            bvs.append({r, leftV, rightV});
+        }
+
+        // Selection->row map for row lookup, so we can grab boundary
+        // values for the right row inside the snap loop.
+        QHash<int, BoundaryVals> bvByRow;
+        for (const auto &b : bvs) bvByRow.insert(b.row, b);
+
+        emit bulkEditBegin();
+        m_suppressEdits = true;
+        const int span = colMax - colMin;
+        for (const auto &s : snaps) {
+            const auto bv = bvByRow.value(s.row, BoundaryVals{s.row, s.oldValue, s.oldValue});
+            // Position within selection, 0..span. t in [0,1] across span.
+            const double t = (span > 0) ? double(s.col - colMin) / double(span) : 0.0;
+            // Choose endpoints: prefer real boundaries; if only one
+            // side is bounded, the other endpoint is the selection's
+            // own end-row value (snapshot's oldValue at colMax/colMin).
+            int leftEnd  = haveLeftBoundary  ? bv.leftV  : s.oldValue;
+            int rightEnd = haveRightBoundary ? bv.rightV : s.oldValue;
+            const double newV = leftEnd + t * (rightEnd - leftEnd);
+            emit cellEdited(m_currentMap, m_currentInstance,
+                            s.row, s.col, int(std::round(newV)));
+        }
+        m_suppressEdits = false;
+        emit bulkEditEnd();
+        return;
+    }
 }
 
 } // namespace EcuParser

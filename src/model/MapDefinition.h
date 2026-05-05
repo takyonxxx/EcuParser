@@ -37,6 +37,18 @@ struct MapDefinition {
     AxisDefinition axisY;
     bool     enabled  = true;
 
+    // Optional linear unit conversion: physical = raw * scale + offset.
+    // Defaults to scale=1, offset=0 (i.e. raw value pass-through). Set by
+    // DriverNames overrides for known maps (rail pressure -> bar, torque
+    // limiter -> Nm proxy, turbo pressure -> mbar). When XDF MATH parsing
+    // is added, simple "X * a + b" expressions will populate these too.
+    // Editing always operates on the raw u16 value; the table merely
+    // displays a converted column to the right of the raw value when
+    // unit is non-empty. This keeps stage/checksum semantics unchanged.
+    double  scale  = 1.0;
+    double  offset = 0.0;
+    QString unit;                 // "bar", "Nm", "mbar", "deg", etc.
+
     // Optional category hint set by parsers that already know the
     // category (e.g. XdfParser uses XDF's <CATEGORY> tag, or derives it
     // from the title). When unset (Other), category() falls back to the

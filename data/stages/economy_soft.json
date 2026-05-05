@@ -1,0 +1,77 @@
+{
+  "name": "Economy (Soft)",
+  "description": "Daily-driver fuel-economy tune. Target: -5%..-8% fuel consumption. Stock peak torque preserved (~400 Nm), peak power slightly reduced (~5%). Strategy: lift low-mid RPM torque (driver shifts up earlier), trim upper RPM torque (driver avoids high-rev band), raise rail pressure (better atomisation, more efficient burn). EGR stays ON (critical for fuel economy). No hardware modification required, hardware-safe.",
+  "schemas": ["28F0_100"],
+  "edits": [
+    {
+      "map": "torque limiter",
+      "pct": 8,
+      "row_min": 2,
+      "row_max": 4,
+      "max_value": 7500,
+      "comment": "+8% low-mid RPM (1250-1700 rpm). Driver upshifts earlier, engine cruises at lower RPM = fuel saved. Cap 7500 = stock peak (400 Nm limit preserved)."
+    },
+    {
+      "map": "torque limiter",
+      "pct": -7,
+      "row_min": 13,
+      "row_max": 16,
+      "comment": "-7% upper RPM (3500-4100 rpm). When driver pushes the pedal, torque feels weak so they instinctively avoid the high-rev band. Caps the fuel peak."
+    },
+    {
+      "map": "rail pressure",
+      "pct": 8,
+      "row_min": 4,
+      "col_min": 6,
+      "max_value": 13800,
+      "comment": "+8% rail pressure in mid-high load region. Smaller fuel droplets = more complete combustion = more work from the same fuel. Also reduces smoke. Cap 1380 bar (CP1 pump safe)."
+    },
+    {
+      "map": "turbo pressure",
+      "pct": 3,
+      "row_min": 3,
+      "row_max": 6,
+      "col_min": 5,
+      "col_max": 9,
+      "max_value": 2300,
+      "comment": "+3% boost in low-mid RPM band. Light torque assist = driver presses pedal less = less fuel. Cap 2300 mbar (turbo-safe)."
+    },
+    {
+      "map": "fuel during acceleration",
+      "pct": -8,
+      "col_min": 6,
+      "comment": "-8% transient fuel in high-load region. When driver mashes the pedal the engine feels 'unresponsive', they naturally back off = fuel saved. Subtle 'eco-mode' effect."
+    },
+    {
+      "map": "injection at part throttle",
+      "pct": -8,
+      "row_min": 12,
+      "col_min": 11,
+      "comment": "-8% main fuel at 3000+ rpm high-load region. Upper-RPM performance is constrained = driver doesn't 'work the engine', cruise stays in 1500-2500 rpm band."
+    }
+  ],
+  "options": [
+    {
+      "id": "egr_protect",
+      "label": "Keep EGR active (REQUIRED for Economy mode)",
+      "description": "This option must remain OFF (i.e. EGR stays ON) for Economy mode to work. EGR is a critical part of fuel economy: it recycles exhaust gas, improves heat distribution, lowers combustion temperature, and net-reduces fuel consumption. Disabling EGR breaks Economy mode - in this variant EGR-off is COUNTER-PRODUCTIVE.",
+      "default": false,
+      "edits": []
+    },
+    {
+      "id": "rev_limit_soft",
+      "label": "Soft rev-limit (gentle taper at 3800 rpm)",
+      "description": "Optional: cuts the torque-limiter cells at 3700-4100 rpm by an additional 15%. The engine 'softly brakes' as the driver leans on the pedal near 3800 rpm, prompting an upshift naturally. Useful for more aggressive economy. Works well on manual transmissions; not needed on automatics.",
+      "default": false,
+      "edits": [
+        {
+          "map": "torque limiter",
+          "pct": -15,
+          "row_min": 14,
+          "row_max": 16,
+          "comment": "Additional -15% at upper RPM, creates a soft rev-limit feel."
+        }
+      ]
+    }
+  ]
+}

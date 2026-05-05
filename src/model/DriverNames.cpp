@@ -38,6 +38,11 @@ struct NameEntry {
     // the .drt lists multiple, e.g. J293_822's "(Boost x RPM)" maps -
     // the .drt has 2 addresses each but the reference tool only shows the first.
     int     maxInstances {0};
+    // Linear unit conversion for display: physical = raw*scale + offset.
+    // Default scale=1, offset=0, unit="" so unrecognised maps stay raw.
+    double  scale  {1.0};
+    double  offset {0.0};
+    QString unit;
 };
 
 // Build the override table once. Address + name + dimensions catalogued
@@ -83,16 +88,24 @@ const QHash<MapKey, NameEntry> &table()
 
         m.insert({s28, 0x076F52},
                  {QStringLiteral("injection at part throttle"), 1, 16, 16, {}, {},
-                  MapCategory::Injection});
+                  MapCategory::Injection, 0,
+                  // No clean physical unit for raw injector pulse counts; leave raw.
+                  1.0, 0.0, QString()});
         m.insert({s28, 0x07ADD2},
                  {QStringLiteral("rail pressure"), 2, 16, 16, sharedInjectionRpm, {},
-                  MapCategory::Injection});
+                  MapCategory::Injection, 0,
+                  // 0x07ADD2 ranges 2266..13500; OEM rail max ~1350 bar so 10:1 scale
+                  // gives a calibrated 226..1350 bar range. Verified against typical
+                  // EDC15C diesel rail layouts.
+                  0.1, 0.0, QStringLiteral("bar")});
         m.insert({s28, 0x072CF0},
                  {QStringLiteral("injection at part throttle (Map 1)"), 3, 16, 20,
-                  sharedInjectionRpm, {}, MapCategory::Injection});
+                  sharedInjectionRpm, {}, MapCategory::Injection, 0,
+                  1.0, 0.0, QString()});
         m.insert({s28, 0x072FC0},
                  {QStringLiteral("injection at part throttle (Map 2)"), 4, 16, 20,
-                  sharedInjectionRpm, {}, MapCategory::Injection});
+                  sharedInjectionRpm, {}, MapCategory::Injection, 0,
+                  1.0, 0.0, QString()});
 
         // (Map 1) (Boost x RPM): the .drt lists 2 addresses but the reference tool
         // reference only displays the first - we honour that by clamping
@@ -100,34 +113,59 @@ const QHash<MapKey, NameEntry> &table()
         // file and bin so a future "expert mode" could expose it.
         m.insert({s28, 0x078C5A},
                  {QStringLiteral("injection at part throttle (Map 1) (Boost x RPM)"), 5,
-                  16, 20, sharedInjectionRpm, {}, MapCategory::Injection, 1});
+                  16, 20, sharedInjectionRpm, {}, MapCategory::Injection, 1,
+                  1.0, 0.0, QString()});
         m.insert({s28, 0x078F2A},
                  {QStringLiteral("injection at part throttle (Map 1) (Boost x RPM)"), 5,
-                  16, 20, sharedInjectionRpm, {}, MapCategory::Injection, 1});
+                  16, 20, sharedInjectionRpm, {}, MapCategory::Injection, 1,
+                  1.0, 0.0, QString()});
 
         // (Map 2) (Boost x RPM): same situation - first address only.
         m.insert({s28, 0x0791FA},
                  {QStringLiteral("injection at part throttle (Map 2) (Boost x RPM)"), 6,
-                  16, 20, sharedInjectionRpm, {}, MapCategory::Injection, 1});
+                  16, 20, sharedInjectionRpm, {}, MapCategory::Injection, 1,
+                  1.0, 0.0, QString()});
         m.insert({s28, 0x0794CA},
                  {QStringLiteral("injection at part throttle (Map 2) (Boost x RPM)"), 6,
-                  16, 20, sharedInjectionRpm, {}, MapCategory::Injection, 1});
+                  16, 20, sharedInjectionRpm, {}, MapCategory::Injection, 1,
+                  1.0, 0.0, QString()});
 
         m.insert({s28, 0x071F52},
                  {QStringLiteral("phase of injection"), 7, 12, 16, {}, {},
-                  MapCategory::Injection});
+                  MapCategory::Injection, 0,
+                  // EDC15C SOI map convention: raw / 100 -> deg before TDC.
+                  0.01, 0.0, QStringLiteral("degCA")});
         m.insert({s28, 0x07753E},
                  {QStringLiteral("fuel during acceleration"), 8, 12, 10, {}, {},
-                  MapCategory::Injection});
+                  MapCategory::Injection, 0,
+                  1.0, 0.0, QString()});
         m.insert({s28, 0x07765E},
                  {QStringLiteral("fuel during acceleration (Map 2)"), 9, 10, 10, {}, {},
-                  MapCategory::Injection});
+                  MapCategory::Injection, 0,
+                  1.0, 0.0, QString()});
         m.insert({s28, 0x075EA0},
                  {QStringLiteral("turbo pressure"), 10, 12, 12, {}, {},
-                  MapCategory::Turbo});
+                  MapCategory::Turbo, 0,
+                  // Boost target: raw value IS the absolute pressure in mbar.
+                  // Factory range 1000..2250 -> 1.0..2.25 bar absolute (matches
+                  // typical 0.0..1.25 bar gauge on a 2.7 CRD).
+                  1.0, 0.0, QStringLiteral("mbar")});
         m.insert({s28, 0x076D82},
                  {QStringLiteral("torque limiter"), 11, 19, 1, {}, {},
-                  MapCategory::Limiters});
+                  MapCategory::Limiters, 0,
+                  // Mercedes OM612 (Jeep WJ 2.7 CRD) factory peak torque
+                  // is 400 Nm at 1800-2400 rpm, corresponding to factory
+                  // peak limiter raw value 7500 (verified across stock
+                  // bins 293-822 and 409-438 at rows 6-7). Linear proxy
+                  // 400/7500 = 0.05333 Nm per raw count.
+                  //
+                  // Don't confuse with the VM Motori 2.7 CRD variant
+                  // (R425/R428) used in some other Chrysler/Jeep markets,
+                  // which is rated 295 Nm / 175 PS - that's a different
+                  // engine block in the same chassis. The Jeep WJ 2.7
+                  // CRD sold in Europe with the Bosch EDC15C 28F0_100
+                  // calibration and the bins we work with all use OM612.
+                  400.0 / 7500.0, 0.0, QStringLiteral("Nm")});
 
         return m;
     }();
@@ -209,9 +247,57 @@ MapCategory DriverNames::effectiveCategory(const QString &schemaId,
 
 int DriverNames::maxInstances(const QString &schemaId, const MapDefinition &map)
 {
+    if (expertMode())
+        return 0;  // expose every shadow instance
     if (auto *e = lookup(schemaId, map))
         return e->maxInstances;
     return 0;
+}
+
+namespace {
+// File-static so toggle survives across calls without bloating the
+// public API. Atomic-trivial type, no synchronisation needed (Qt GUI
+// is single-threaded; we don't read this from worker threads).
+bool g_expertMode = false;
+}
+
+void DriverNames::setExpertMode(bool on) { g_expertMode = on; }
+bool DriverNames::expertMode()           { return g_expertMode; }
+
+double DriverNames::scaleFor(const QString &schemaId, const MapDefinition &map)
+{
+    if (auto *e = lookup(schemaId, map))
+        return e->scale;
+    return 1.0;
+}
+
+double DriverNames::offsetFor(const QString &schemaId, const MapDefinition &map)
+{
+    if (auto *e = lookup(schemaId, map))
+        return e->offset;
+    return 0.0;
+}
+
+QString DriverNames::unitFor(const QString &schemaId, const MapDefinition &map)
+{
+    if (auto *e = lookup(schemaId, map))
+        return e->unit;
+    return QString();
+}
+
+void DriverNames::applyUnitOverride(const QString &schemaId, MapDefinition *map)
+{
+    if (!map) return;
+    if (auto *e = lookup(schemaId, *map)) {
+        // Only override when the entry actually carries unit information,
+        // so XDF parsers that already populated scale/offset from <MATH>
+        // don't get clobbered by a default 1.0/0.0/"" entry.
+        if (!e->unit.isEmpty() || e->scale != 1.0 || e->offset != 0.0) {
+            map->scale  = e->scale;
+            map->offset = e->offset;
+            map->unit   = e->unit;
+        }
+    }
 }
 
 } // namespace EcuParser

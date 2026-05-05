@@ -1,13 +1,22 @@
 #include "MainWindow.h"
 
 #include "AppPaths.h"
+#include "ChecksumDialog.h"
+#include "CustomTuneDialog.h"
+#include "DiffViewWidget.h"
 #include "DriverTreeWidget.h"
 #include "../model/DriverNames.h"
 #include "MapGraphWidget.h"
 #include "MapTableWidget.h"
+#include "StagePreviewDialog.h"
+#include "Surface3DWidget.h"
+#include "TuneLogDialog.h"
+#include "UndoCommands.h"
 #include "../core/DrtParser.h"
+#include "../core/Checksum.h"
 #include "../core/MapData.h"
 #include "../core/StagePackage.h"
+#include "../core/TuneLogger.h"
 #include "../core/XdfParser.h"
 
 #include <QAction>
@@ -31,6 +40,7 @@
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QToolBar>
+#include <QUndoStack>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -125,6 +135,56 @@ void MainWindow::buildUi()
     copyAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+R")));
     connect(copyAct, &QAction::triggered,
             this, &MainWindow::onCopyOriginalToModified);
+    toolsMenu->addSeparator();
+    auto *checksumAct = toolsMenu->addAction(QStringLiteral("&Checksum verify / repair..."));
+    checksumAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+K")));
+    connect(checksumAct, &QAction::triggered,
+            this, &MainWindow::onVerifyChecksum);
+    auto *customAct = toolsMenu->addAction(QStringLiteral("Custom &tune editor..."));
+    customAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+M")));
+    connect(customAct, &QAction::triggered,
+            this, &MainWindow::onCustomTuneEditor);
+    auto *logAct = toolsMenu->addAction(QStringLiteral("Tune &log..."));
+    logAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+L")));
+    connect(logAct, &QAction::triggered,
+            this, &MainWindow::onShowTuneLog);
+
+    // ====== View menu ======
+    // Toggle whether shadow map instances are exposed. Off by default
+    // (matches the reference tool, which hides the duplicate addresses
+    // for "(Boost x RPM)" maps). Turning this on lets the user inspect
+    // the second copy that the .drt file records but the reference tool
+    // doesn't display - useful for verifying the two addresses really
+    // hold identical bytes, or for editing the shadow if it diverges.
+    auto *viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
+    auto *expertAct = viewMenu->addAction(QStringLiteral("&Expert mode (show shadow instances)"));
+    expertAct->setCheckable(true);
+    expertAct->setChecked(DriverNames::expertMode());
+    connect(expertAct, &QAction::toggled,
+            this, [this](bool on) {
+                DriverNames::setExpertMode(on);
+                // Rebuild the tree - maxInstances now answers differently,
+                // so the per-map instance children must be regenerated.
+                if (m_driver) m_tree->setDriver(m_driver.get());
+                refreshCurrentMap();
+            });
+
+    // ====== Edit menu (Undo/Redo) ======
+    // Single per-window undo stack. Cleared when a modified bin is
+    // (re)loaded - the underlying bytes change, so old commands no
+    // longer make sense. Stage applies push a single BulkRegionCommand
+    // for the whole bin so one Ctrl+Z reverts an entire stage in one
+    // step (otherwise undoing a stage would require N keystrokes for
+    // N edited cells).
+    m_undoStack = new QUndoStack(this);
+    m_undoStack->setUndoLimit(200);
+    auto *editMenu = menuBar()->addMenu(QStringLiteral("&Edit"));
+    m_undoAct = m_undoStack->createUndoAction(this, QStringLiteral("&Undo"));
+    m_undoAct->setShortcut(QKeySequence::Undo);
+    editMenu->addAction(m_undoAct);
+    m_redoAct = m_undoStack->createRedoAction(this, QStringLiteral("&Redo"));
+    m_redoAct->setShortcut(QKeySequence::Redo);
+    editMenu->addAction(m_redoAct);
 
     // ====== Central area ======
     auto *central = new QWidget(this);
@@ -143,8 +203,12 @@ void MainWindow::buildUi()
     m_tabs      = new QTabWidget(split);
     m_tableView = new MapTableWidget(m_tabs);
     m_graphView = new MapGraphWidget(m_tabs);
-    m_tabs->addTab(m_tableView, QStringLiteral("Table"));
-    m_tabs->addTab(m_graphView, QStringLiteral("Graph"));
+    m_diffView  = new DiffViewWidget(m_tabs);
+    m_surfaceView = new Surface3DWidget(m_tabs);
+    m_tabs->addTab(m_tableView,   QStringLiteral("Table"));
+    m_tabs->addTab(m_graphView,   QStringLiteral("Graph"));
+    m_tabs->addTab(m_surfaceView, QStringLiteral("3D"));
+    m_tabs->addTab(m_diffView,    QStringLiteral("Diff"));
     split->addWidget(m_tree);
     split->addWidget(m_tabs);
     split->setStretchFactor(0, 0);
@@ -184,6 +248,15 @@ void MainWindow::buildUi()
             this, &MainWindow::onBrowseOriginalBin);
     connect(browseModBtn, &QPushButton::clicked,
             this, &MainWindow::onBrowseModifiedBin);
+
+    // Diff tab: double-click jumps the user back to the Table tab on
+    // that map. We forward through onMapSelected so all the existing
+    // tree/table/graph plumbing fires identically to clicking the tree.
+    connect(m_diffView, &DiffViewWidget::mapActivated,
+            this, [this](const MapDefinition *m, int inst) {
+                onMapSelected(m, inst);
+                if (m_tabs) m_tabs->setCurrentWidget(m_tableView);
+            });
 }
 
 void MainWindow::populateDataCombos()
@@ -279,10 +352,21 @@ bool MainWindow::loadDriver(const QString &path)
         return false;
     }
     m_driver = std::make_unique<DriverModel>(std::move(*parsed));
+    // Stitch in physical-unit overrides for known maps in this schema.
+    // After this loop, every MapDefinition::{scale,offset,unit} reflects
+    // either what the parser already filled (XDF MATH equation, in
+    // future) or what DriverNames knows about (rail pressure -> bar,
+    // torque limiter -> Nm proxy, etc.).
+    for (MapDefinition &m : m_driver->maps)
+        DriverNames::applyUnitOverride(m_driver->schemaId, &m);
     m_tree->setDriver(m_driver.get());
     m_tableView->clearMap();
     m_graphView->clear();
     refreshTitle();
+    // Driver change can change the schema and therefore which protected
+    // regions apply. Refresh the modified bin's snapshot list so the
+    // save-time guard uses the new schema's profile.
+    refreshProtectedSnapshots();
     statusBar()->showMessage(
         QStringLiteral("Driver loaded: %1 (%2 maps, format: %3)")
             .arg(QFileInfo(path).fileName())
@@ -310,6 +394,66 @@ bool MainWindow::loadOriginalBin(const QString &path)
     refreshTitle();
     m_tree->setBins(m_origBin.get(), m_modBin.get());
     refreshCurrentMap();
+
+    // === Driver auto-detect ===
+    // If no driver is loaded yet, peek at the bin to guess the schema
+    // and auto-pick a matching .drt from the data dir. We skip this if
+    // a driver IS loaded and matches - the user has already curated
+    // their setup. We also skip if multiple .drt candidates match: in
+    // that case the user must choose, since picking blindly could
+    // misrepresent the bin (J293_822/J094_704/J409_438 all use the
+    // same schema 28F0_100 but represent different SW revisions).
+    const QString detected = m_origBin->detectSchema();
+    const bool needAutoPick = !m_driver
+        || (m_driver && !detected.isEmpty() && m_driver->schemaId != detected);
+    if (needAutoPick && !detected.isEmpty()) {
+        const QStringList drvs = AppPaths::listDrivers();
+        // Walk every available driver and check which ones have schema
+        // == detected. We do NOT auto-load if 0 or multiple match - we
+        // surface the suggestion in the status bar instead so the user
+        // can decide.
+        QStringList matching;
+        for (const QString &drvPath : drvs) {
+            const QString ext = QFileInfo(drvPath).suffix().toLower();
+            std::optional<DriverModel> p;
+            QString perr;
+            if (ext == QStringLiteral("xdf"))
+                p = XdfParser::parseFile(drvPath, &perr);
+            else
+                p = DrtParser::parseFile(drvPath, &perr);
+            if (p && p->schemaId == detected)
+                matching.append(drvPath);
+        }
+        if (matching.size() == 1) {
+            // Single match: load it silently. The user can revert via
+            // the driver combo if they want a different one.
+            loadDriver(matching.first());
+            const int idx = m_driverCombo->findData(matching.first());
+            if (idx >= 0) m_driverCombo->setCurrentIndex(idx);
+            statusBar()->showMessage(
+                QStringLiteral("Auto-loaded driver %1 (schema %2 detected)")
+                    .arg(QFileInfo(matching.first()).fileName(), detected),
+                5000);
+        } else if (matching.size() > 1) {
+            // Multiple candidates: just hint, don't pick.
+            statusBar()->showMessage(
+                QStringLiteral("Schema %1 detected - %2 drivers match. "
+                               "Pick one from the Driver combo.")
+                    .arg(detected).arg(matching.size()),
+                6000);
+        }
+    }
+
+    // The auto-mirror of Modified <- Original happens in
+    // onOriginalBinComboChanged() (where the path is bound to the combo
+    // index), not here. loadOriginalBin can also be called from the
+    // browse dialog and doesn't need the mirror behaviour itself.
+    //
+    // If a modified bin is already loaded, refresh its protected
+    // snapshots from the new original. This keeps the snapshot bytes
+    // consistent with whatever the user considers the "stock" - even
+    // if they reload original after modified.
+    refreshProtectedSnapshots();
     return true;
 }
 
@@ -325,6 +469,19 @@ bool MainWindow::loadModifiedBin(const QString &path)
     m_modBin = std::move(bin);
     m_modBinPath = path;
     m_modDirty = false;
+    // Reset undo history: previous commands referenced bytes that no
+    // longer exist (the file changed). Without this clear, hitting
+    // Ctrl+Z after loading a different bin would write the OLD bin's
+    // pre-edit bytes into NEW bin offsets - silent, dangerous corruption.
+    if (m_undoStack) m_undoStack->clear();
+    // Set up protected-region snapshots so the calibration checksum
+    // word at 0x07BD7C and the ECU module ID stamps are preserved
+    // verbatim from the ORIGINAL bin into any saved modified bin.
+    // Source of truth for the snapshot bytes is the original (stock)
+    // bin - that's the value the ECU was running on, so by definition
+    // the ECU has accepted it. See Checksum.cpp profile and BinFile.h
+    // for the rationale (Bosch CRC algorithm not reverse-engineered).
+    refreshProtectedSnapshots();
     statusBar()->showMessage(
         QStringLiteral("Modified bin: %1 (%2 bytes)")
             .arg(QFileInfo(path).fileName())
@@ -336,6 +493,31 @@ bool MainWindow::loadModifiedBin(const QString &path)
     return true;
 }
 
+void MainWindow::refreshProtectedSnapshots()
+{
+    // Wire the originating bin's bytes into the modified bin's
+    // ProtectedSnapshot list. Called from both loadOriginalBin (when
+    // the orig bin changes) and loadModifiedBin (when the mod bin
+    // changes). Both call sites need to stay consistent: the snapshot
+    // bytes are taken from the ORIGINAL bin, not the modified one.
+    if (!m_modBin || !m_origBin || !m_driver) {
+        if (m_modBin) m_modBin->clearProtectedSnapshots();
+        return;
+    }
+    const ChecksumProfile prof = Checksum::profileForSchema(m_driver->schemaId);
+    if (prof.protectedRegions.isEmpty()) {
+        m_modBin->clearProtectedSnapshots();
+        return;
+    }
+    QList<QPair<quint32, quint32>> regions;
+    QStringList descs;
+    for (const ProtectedRegion &pr : prof.protectedRegions) {
+        regions.append({pr.startOffset, pr.endOffset});
+        descs.append(pr.description);
+    }
+    m_modBin->setProtectedSnapshots(m_origBin->raw(), regions, descs);
+}
+
 void MainWindow::onMapSelected(const MapDefinition *map, int addressIndex)
 {
     if (!map)
@@ -345,10 +527,19 @@ void MainWindow::onMapSelected(const MapDefinition *map, int addressIndex)
                          schema, map, addressIndex);
     m_graphView->setMap(map, addressIndex,
                         schema, m_origBin.get(), m_modBin.get());
+    if (m_surfaceView) {
+        m_surfaceView->setMap(map, addressIndex, schema,
+                              m_origBin.get(), m_modBin.get());
+    }
 }
 
 void MainWindow::refreshCurrentMap()
 {
+    // Always refresh the diff overview - it doesn't depend on a
+    // selected map and reflects the global state of MOD vs ORI.
+    if (m_diffView)
+        m_diffView->refresh(m_driver.get(), m_origBin.get(), m_modBin.get());
+
     const MapDefinition *m = m_tableView->currentMap();
     if (!m)
         return;
@@ -380,11 +571,45 @@ void MainWindow::onCellEdited(const MapDefinition *map, int instanceIndex,
     const quint32 base = map->addresses.at(instanceIndex);
     const quint32 off  = base + quint32(idx * map->cellSize);
 
+    // Skip the undo machinery when the call is itself a redo/undo
+    // replay - the QUndoCommand drives the bin write directly via
+    // undoRedoWriteU16LE() so we must NOT push another command here
+    // (would result in a stack that recurses forever on Ctrl+Y).
     bool ok = false;
     if (map->cellSize == 2) {
-        // Cells are little-endian in EDC15C bins (matches readU16LE used in
-        // MapData::readMapInstance).
-        ok = m_modBin->writeU16LE(off, quint16(qBound(0, int(newValue), 65535)));
+        const quint16 clamped = quint16(qBound(0, int(newValue), 65535));
+        if (m_replayingUndo) {
+            // Direct write, no command push.
+            ok = m_modBin->writeU16LE(off, clamped);
+        } else {
+            // Read OLD value first so the command can carry undo state.
+            // If the read fails the offset is invalid - bail before pushing.
+            bool readOk = false;
+            const quint16 oldV = m_modBin->readU16LE(off, &readOk);
+            if (!readOk) {
+                statusBar()->showMessage(
+                    QStringLiteral("Read failed at 0x%1")
+                        .arg(off, 6, 16, QLatin1Char('0')).toUpper(),
+                    4000);
+                return;
+            }
+            if (oldV == clamped) {
+                // No-op edit (user typed the same value back). Don't
+                // pollute the undo stack with empty commands.
+                ok = true;
+            } else if (m_undoStack) {
+                const QString humanName = DriverNames::displayName(schema, *map);
+                auto *cmd = new CellEditCommand(this, off, oldV, clamped,
+                                                humanName, row, col,
+                                                instanceIndex);
+                // QUndoStack::push calls redo() which performs the write
+                // and refresh internally - no separate writeU16LE needed.
+                m_undoStack->push(cmd);
+                ok = true;
+            } else {
+                ok = m_modBin->writeU16LE(off, clamped);
+            }
+        }
     } else {
         ok = false;
     }
@@ -399,8 +624,9 @@ void MainWindow::onCellEdited(const MapDefinition *map, int instanceIndex,
     // During bulk edit we only write bytes - the table widget is busy
     // iterating over its own QTableWidgetItem pointers and a refresh
     // here would invalidate them and crash. The single refresh happens
-    // once in onBulkEditEnd.
-    if (!m_bulkEditInProgress) {
+    // once in onBulkEditEnd. Replay also skips refresh because the
+    // QUndoCommand calls undoRedoRefresh() itself once per command.
+    if (!m_bulkEditInProgress && !m_replayingUndo) {
         refreshTitle();
         refreshCurrentMap();
         m_tree->refreshDiffHighlights();
@@ -472,9 +698,22 @@ void MainWindow::onCopyOriginalToModified()
         statusBar()->showMessage(QStringLiteral("Copy failed: source out of range"), 4000);
         return;
     }
-    if (!m_modBin->writeBytes(base, src)) {
-        statusBar()->showMessage(QStringLiteral("Copy failed: dest out of range"), 4000);
+    // Capture the OLD bytes for undo before we overwrite them.
+    const QByteArray prevBytes = m_modBin->readBytes(base, len);
+    if (prevBytes.size() != len) {
+        statusBar()->showMessage(QStringLiteral("Copy failed: cannot snapshot mod region"), 4000);
         return;
+    }
+    if (m_undoStack) {
+        auto *cmd = new BulkRegionCommand(
+            this, base, prevBytes, src,
+            QStringLiteral("Copy ORI -> MOD: %1 (%2 bytes)").arg(humanName).arg(len));
+        m_undoStack->push(cmd);
+    } else {
+        if (!m_modBin->writeBytes(base, src)) {
+            statusBar()->showMessage(QStringLiteral("Copy failed: dest out of range"), 4000);
+            return;
+        }
     }
     m_modDirty = true;
     refreshTitle();
@@ -620,14 +859,18 @@ void MainWindow::onApplyStage()
         }
     }
 
-    // First reset Modified to a copy of Original so re-applying a stage
-    // is idempotent (otherwise applying Stage1 then Stage2 would
-    // compound percentages on already-edited cells). writeBytes is a
-    // simple bulk overwrite at offset 0.
-    if (!m_modBin->writeBytes(0, m_origBin->raw())) {
-        QMessageBox::warning(this, QStringLiteral("Apply stage"),
-            QStringLiteral("Could not reset Modified bin (size mismatch?)"));
-        return;
+    // === Dry-run preview ===
+    // Walk the stage in preview mode (no writes). Show a per-edit summary
+    // so the user sees if any edit will be silently neutered by a cap
+    // (this is the Stage 2 turbo cap=1900 / torque cap=9500 problem).
+    {
+        const StagePreview prev = previewStage(pkg, *m_driver, *m_origBin,
+                                               enabledOptionIds);
+        StagePreviewDialog dlg(pkg, prev,
+                               m_origBinCombo->currentText(),
+                               m_modBinPath, this);
+        if (dlg.exec() != QDialog::Accepted)
+            return;
     }
 
     // Build the effective stage: core edits plus the edits of any
@@ -640,10 +883,45 @@ void MainWindow::onApplyStage()
     }
     effective.options.clear(); // already merged
 
+    // Snapshot the modified bin BEFORE any change so undo can restore
+    // it in one Ctrl+Z. Then compute the post-stage bytes in a scratch
+    // BinFile and push the whole transformation as a single command.
+    const QByteArray prevBytes = m_modBin->raw();
+
+    // Scratch target: copy of the original (idempotency reset) plus the
+    // effective stage edits. We never touch m_modBin during this
+    // computation - the undo command's redo() does the write.
+    BinFile scratch(m_origBin->raw());
     QStringList warnings;
     const int written = applyStage(effective, *m_driver, *m_origBin,
-                                   m_modBin.get(), &warnings);
+                                   &scratch, &warnings);
+    const QByteArray newBytes = scratch.raw();
+
+    if (m_undoStack) {
+        QString desc = QStringLiteral("Apply stage: %1").arg(pkg.name);
+        if (!enabledOptionIds.isEmpty())
+            desc += QStringLiteral(" (+%1 options)").arg(enabledOptionIds.size());
+        auto *cmd = new BulkRegionCommand(this, 0, prevBytes, newBytes, desc);
+        m_undoStack->push(cmd);  // redo() runs - writes scratch bytes into m_modBin.
+    } else {
+        // Fallback if undo stack isn't initialised for any reason.
+        m_modBin->writeBytes(0, newBytes);
+        refreshTitle();
+        refreshCurrentMap();
+        m_tree->refreshDiffHighlights();
+    }
     m_modDirty = (written > 0);
+    // Persistent log entry: written count, stage name, schema, mod bin
+    // path. Survives across launches via SQLite. Users can review under
+    // Tools -> Tune log... and add ratings/notes once the tune has been
+    // road-tested.
+    if (written > 0) {
+        TuneLogger::recordApply(
+            m_driver ? m_driver->schemaId : QString(),
+            m_modBinPath,
+            pkg.name,
+            written);
+    }
     refreshTitle();
     refreshCurrentMap();
     m_tree->refreshDiffHighlights();
@@ -667,6 +945,77 @@ void MainWindow::onApplyStage()
     statusBar()->showMessage(QStringLiteral("Applied stage '%1' (%2 cells)")
                                  .arg(pkg.name).arg(written), 5000);
     QMessageBox::information(this, QStringLiteral("Apply stage"), summary);
+}
+
+void MainWindow::onShowTuneLog()
+{
+    TuneLogDialog dlg(this);
+    dlg.exec();
+}
+
+void MainWindow::onVerifyChecksum()
+{
+    if (!m_modBin) {
+        QMessageBox::information(this, QStringLiteral("Checksum"),
+            QStringLiteral("Load a Modified bin first - checksums operate on the\n"
+                           "bin you intend to flash, not on the read-only Original."));
+        return;
+    }
+    const QString schema = m_driver ? m_driver->schemaId : QString();
+    ChecksumDialog dlg(this, m_modBin.get(), m_modBinPath, schema, this);
+    dlg.exec();
+}
+
+void MainWindow::onCustomTuneEditor()
+{
+    if (!m_driver || !m_origBin || !m_modBin) {
+        QMessageBox::information(this, QStringLiteral("Custom tune"),
+            QStringLiteral("Load a driver and both Original + Modified bins first."));
+        return;
+    }
+    CustomTuneDialog dlg(this, m_driver.get(), m_origBin.get(), this);
+    if (dlg.exec() != QDialog::Accepted) return;
+    const StagePackage pkg = dlg.resultPackage();
+    if (pkg.edits.isEmpty()) return;
+
+    // Same pattern as onApplyStage's tail: snapshot mod, apply to a
+    // scratch copy of orig, push BulkRegionCommand for undo.
+    const QByteArray prevBytes = m_modBin->raw();
+    BinFile scratch(m_origBin->raw());
+    QStringList warnings;
+    const int written = applyStage(pkg, *m_driver, *m_origBin,
+                                   &scratch, &warnings);
+    if (written == 0) {
+        QMessageBox::information(this, QStringLiteral("Custom tune"),
+            QStringLiteral("Tune touched 0 cells.%1")
+                .arg(warnings.isEmpty()
+                         ? QString()
+                         : QStringLiteral("\n\nWarnings:\n  - %1")
+                               .arg(warnings.join(QStringLiteral("\n  - ")))));
+        return;
+    }
+    const QByteArray newBytes = scratch.raw();
+    auto *cmd = new BulkRegionCommand(
+        this, 0, prevBytes, newBytes,
+        QStringLiteral("Custom tune: %1 (%2 cells)")
+            .arg(pkg.name.isEmpty() ? QStringLiteral("unnamed") : pkg.name)
+            .arg(written));
+    pushUndoCommand(cmd);
+    m_modDirty = true;
+    TuneLogger::recordApply(
+        m_driver ? m_driver->schemaId : QString(),
+        m_modBinPath,
+        pkg.name.isEmpty() ? QStringLiteral("(custom)") : pkg.name,
+        written);
+    statusBar()->showMessage(
+        QStringLiteral("Custom tune '%1' applied (%2 cells)")
+            .arg(pkg.name).arg(written),
+        5000);
+    if (!warnings.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Custom tune"),
+            QStringLiteral("Applied with warnings:\n  - %1")
+                .arg(warnings.join(QStringLiteral("\n  - "))));
+    }
 }
 
 void MainWindow::onExportModifiedBin()
@@ -798,6 +1147,48 @@ void MainWindow::refreshTitle()
     if (m_modDirty)
         t += QStringLiteral(" *");
     setWindowTitle(t);
+}
+
+bool MainWindow::undoRedoWriteU16LE(quint32 offset, quint16 value)
+{
+    if (!m_modBin) return false;
+    m_replayingUndo = true;
+    const bool ok = m_modBin->writeU16LE(offset, value);
+    m_replayingUndo = false;
+    if (ok) m_modDirty = true;
+    return ok;
+}
+
+bool MainWindow::undoRedoWriteBytes(quint32 offset, const QByteArray &bytes)
+{
+    if (!m_modBin) return false;
+    m_replayingUndo = true;
+    const bool ok = m_modBin->writeBytes(offset, bytes);
+    m_replayingUndo = false;
+    if (ok) m_modDirty = true;
+    return ok;
+}
+
+void MainWindow::undoRedoRefresh()
+{
+    refreshTitle();
+    refreshCurrentMap();
+    if (m_tree) m_tree->refreshDiffHighlights();
+}
+
+void MainWindow::pushUndoCommand(QUndoCommand *cmd)
+{
+    if (!cmd) return;
+    if (m_undoStack) {
+        // QUndoStack::push calls cmd->redo() and takes ownership.
+        m_undoStack->push(cmd);
+    } else {
+        // No stack: replay redo manually then leak the command. This
+        // shouldn't happen in practice (m_undoStack is created in
+        // buildUi()) but the fallback keeps callers safe.
+        cmd->redo();
+        delete cmd;
+    }
 }
 
 } // namespace EcuParser

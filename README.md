@@ -1,194 +1,124 @@
-# EcuParser - Qt 6 / C++ GUI
+# EcuParser
 
-A Qt 6 application that parses `.drt` driver files and visualises
-EDC15C bin files in side-by-side comparison mode. Load an original
-(stock) bin and a modified (tune) bin together, browse every map
-defined by the driver as either a table or a graph, edit cells, and
-export the modified bin back to disk.
+A Qt/C++ desktop tool for inspecting and editing Bosch EDC15C diesel ECU calibration files. Targeted at the Jeep WJ 2.7 CRD (Mercedes OM612 engine, schema `28F0_100`), but extensible to other EDC15C variants by supplying a matching driver file.
 
-## Driver formats
+EcuParser parses calibration drivers (`.drt` and `.xdf` formats), reads and edits the maps they describe inside a binary firmware dump, and writes a modified bin while preserving the bytes that matter for ECU validation.
 
-EcuParser reads two driver formats:
+---
 
-- **`.drt`** - the format we reverse-engineered ourselves; what most of
-  the bundled `data/J*.drt` files use.
-- **`.xdf`** - TunerPro Definition File. XML-based, open, widely shared
-  in the open-source tuning community. Drop XDFs in `data/` or
-  `data/xdf/` and they'll appear in the Driver combo alongside DRTs.
+## Capabilities
 
-The XDF parser implements the subset most XDFs in the wild use:
+### Driver parsing
+- Native parser for `.drt` files (custom format with map name, address, dimensions, and axes).
+- TunerPro `.xdf` parser, including the `MATH` equation field for physical-unit conversion.
+- Auto-detects the schema from the loaded bin and suggests a matching driver from the data directory.
 
-- Top-level `<XDFHEADER>` description
-- `<CATEGORY>` index/name for grouping
-- `<XDFTABLE>` with `<title>`, `<description>`, `<CATEGORYMEM>`
-- One `<XDFAXIS id="z">` per table carrying `<EMBEDDEDDATA>` with
-  `mmedaddress`, `mmedelementsizebits`, `mmedrowcount`, `mmedcolcount`
-- X and Y axes for breakpoint addresses
+### Map editing
+- Browse all maps the driver describes in a tree grouped by category (Injection, Turbo, Limiters, etc.).
+- Edit cells in a 2D table view with min/max/mean readouts and an optional physical-unit overlay (e.g. `7500 raw → 400 Nm`).
+- Smoothing tools: linear gradient between selected cells, scale by percentage, fill region with a constant.
+- Full undo/redo stack.
+- Original vs Modified mirror: any edit shows a coloured delta against the original bin.
 
-Currently NOT interpreted (cells are read as raw u16 LE):
+### Visualisation
+- 2D graph view per map (line for 1D, contour for 2D).
+- 3D surface view: filled colour-graded mesh for the modified map plus a vivid blue wireframe overlay for the original. 1D maps are drawn as a four-cell-wide ribbon so torque-limiter shape changes are visible. Mouse: left-drag to rotate, right-drag to pan, wheel to zoom.
 
-- `<MATH equation="...">` formulas (raw values shown instead of
-  scaled physical units)
-- `<XDFCONSTANT>`, `<XDFFLAG>` (single values and bit flags)
-- Per-table endianness/sign overrides (we read header `<DEFAULTS>`
-  and assume LE u16)
+### Diff overview
+- Tab listing every map and how much the modified bin diverges from the original: cells touched, percentage changed, mean delta, max/min delta, mean delta in physical units.
+- Coloured summary line at the top with three semantic chips:
+  - **Peak torque** — stock → modified Nm with absolute and percentage delta (amber).
+  - **Est. peak power** — stock → modified PS, projected from the torque-limiter peak using `stockPS × (1 + 0.7 × ΔTorque%)` (pink).
+  - **Est. fuel use** — projected fuel consumption change (red for increase, green for decrease, gray for negligible). Computed from a weighted-contribution model:
 
-A sample XDF for J293_822 lives at `data/xdf/J293_822_example.xdf` -
-hand-crafted from the addresses we reverse-engineered, byte-identical
-in behaviour to the J293_822.drt driver. Use it as a starting point
-when authoring XDFs for new schemas.
+| Contribution | Weight |
+|---|---|
+| Main injection mean Δ% (50/50 cruise + full-map blend) | +1.20 |
+| Peak torque limit Δ% (driver-behaviour shaping) | +0.40 |
+| Rail pressure mean Δ% (atomisation efficiency, inverse) | −0.10 |
+| Boost mean Δ% | +0.05 |
+| Transient fuel mean Δ% | +0.08 |
 
-## Supported driver: J293_822 / J094_704 / J409_438 (Jeep WJ 2.7 CRD, EDC15C, schema 28F0_100)
+The cruise zone (rows 3-7, cols 4-10 on a 16×16 map ≈ 1500-2500 rpm × 30-65% load) is the band where typical mixed driving spends its time, so it dominates the fuel projection.
 
-The three drivers are **byte-identical** because the map layout is the
-same across all SW revisions of the Jeep 2.7 CRD; only the underlying
-firmware differs. Eleven maps reverse-engineered and verified against a
-real Stage1 file. The addresses and dimensions are hard-coded in
-`src/model/DriverNames.cpp` because the dim fields in the `.drt` are
-unreliable for some maps and need to be overridden.
+### Stage packages
+Pre-built tune profiles that apply a coordinated set of map edits in one click. Four packages ship by default for the OM612 / 28F0_100 schema:
 
-| #  | Map name                                            | Address   | Size   |
-|----|-----------------------------------------------------|-----------|--------|
-| 1  | injection at part throttle                          | 0x076F52  | 16x16  |
-| 2  | rail pressure                                       | 0x07ADD2  | 16x16  |
-| 3  | injection at part throttle (Map 1)                  | 0x072CF0  | 16x20  |
-| 4  | injection at part throttle (Map 2)                  | 0x072FC0  | 16x20  |
-| 5  | injection at part throttle (Map 1) (Boost x RPM)    | 0x078C5A  | 16x20  |
-| 6  | injection at part throttle (Map 2) (Boost x RPM)    | 0x0791FA  | 16x20  |
-| 7  | phase of injection                                  | 0x071F52  | 12x16  |
-| 8  | fuel during acceleration                            | 0x07753E  | 12x10  |
-| 9  | fuel during acceleration (Map 2)                    | 0x07765E  | 10x10  |
-| 10 | turbo pressure                                      | 0x075EA0  | 12x12  |
-| 11 | torque limiter                                      | 0x076D82  | 19x1   |
+| Stage | Peak torque | Est. peak power | Est. fuel | Notes |
+|---|---|---|---|---|
+| Stage 1 (Black Pearl HO) | 400 → 453 Nm | 163 → 178 PS | ↑ +7% | Hardware-safe, factory-validated target |
+| Stage 2 (market level) | 400 → 520 Nm | 163 → 197 PS | ↑ +22% | Intercooler upgrade recommended |
+| Economy Soft | 400 → 400 Nm | 163 → 163 PS | ↓ −1% | Hardware-safe, EGR stays on |
+| Economy Hard | 400 → 381 Nm | 163 → 158 PS | ↓ −3% | Aggressive eco character, fleet/long-haul |
 
-Maps 5 and 6 (Boost x RPM) are listed in the `.drt` with two
-instances each (the second addresses are `0x078F2A` and `0x0794CA`),
-but the canonical reference behaviour shows only the first. We
-preserve that with `maxInstances=1`.
+Each stage exposes optional sub-edits (EGR off, soft rev-limit, highway cruise, etc.) the user can toggle before applying.
 
-Map 11 (torque limiter) is recorded in the `.drt` with a "?" type
-code, an empty `name`, and `0x0` dimensions; the override in
-DriverNames sets it to `19x1` so it displays correctly.
+### Custom tune editor
+Build a tune inline by adding edits one at a time: pick a map, pick a region (rows/cols), enter a percentage or absolute target, optional cap. Save as JSON and re-apply later or share with another bin.
 
-The five 16-row maps (rail pressure plus Map 1/2 plus the two
-Boost x RPM variants) **share the same RPM axis**, which is not
-stored in the bin but embedded in the driver:
+### Stage preview
+Before committing a stage, see exactly which cells will change and by how much. The diff is rendered with the same coloured delta convention as the table editor.
 
+### Tune logger
+Every applied stage and every manual edit is recorded with timestamp, bin path, and edit summary. Persisted across sessions in SQLite. Reviewable from the Tools menu.
+
+---
+
+## Protected regions (checksum preservation)
+
+The 28F0_100 calibration block has a 4-byte checksum word at offset `0x07BD7C` plus two ECU identification stamps at `0x07BFB6..0x07BFE1` (44 bytes) and `0x07FCFC..0x07FD09` (14 bytes). The checksum algorithm is a Bosch proprietary CRC variant that has not been reverse-engineered with the sample bins available; only commercial tools (CHKSuite, WinOLS, Galletto, ECU.design checksum corrector) include it.
+
+EcuParser handles this with a defense-in-depth approach: when a bin is loaded, the bytes in the protected regions are snapshotted from the original. When the modified bin is saved, those bytes are restored verbatim from the snapshot just before the file is written. This means:
+
+- The on-disk modified bin always has stock bytes at `0x07BD7C..0x07BD7F`, `0x07BFB6..0x07BFE1`, and `0x07FCFC..0x07FD09`.
+- Stage authors cannot accidentally corrupt the checksum word — even if a stage edit addresses bytes inside a protected region, the save path silently restores them.
+- Caveat: this approach works if the ECU validates the checksum word "soft" (read once, trusted) rather than "hard" (re-computed at every boot). EDC15C is generally soft-validated; if a specific sub-revision is hard-validated, a commercial tool is required.
+
+The CLI logs the protection at apply time:
 ```
-700, 800, 900, 1000, 1100, 1300, 1500, 1700,
-1900, 2100, 2400, 2700, 3100, 3500, 4000, 4500
-```
-
-DriverNames keeps these RPM axis values hard-coded.
-
-## Decode rules (verified)
-
-- **Cell endianness: little-endian** - at 0x076F52 the bytes
-  `0x10 0x0E` decode to 3600 LE
-- **Cell layout: idx = axisX_row * dimY + axisY_col** (row-major,
-  RPM = outer index, Load = inner index)
-- **Axis breakpoints are LE** as well
-- **Cell size: 2 bytes (u16)**, range 0..65535
-- **DRT dim fields are not always reliable** - DriverNames overrides
-  pin the dim and axis values per map
-
-## Look and feel
-
-- **Tree sidebar (dark)**: Maps grouped by category (INJECTION / TURBO
-  / LIMITERS / OTHER), sorted by canonical per-driver order.
-- **Table (light theme)**: White/light background, blue header text;
-  only **changed** cells are tinted (green = increase, pink = decrease)
-  with an orig->mod delta in the tooltip.
-- **Graph (cyan background)**: 1 px blue line (Original) and 1 px red
-  line (Modified), Y axis 0..65535 (full u16) on both sides, hex
-  address labels on the X axis.
-- **Cursor crosshair**: Hovering over the graph snaps the crosshair to
-  the nearest cell and shows a cream tooltip with **RPM / Load /
-  address / Ori / Mod (delta)**.
-
-## Features
-
-**File handling**
-
-- Driver / Original / Modified bin combos populated from `data/`,
-  nothing loaded at startup.
-- "..." browse buttons let you pick files outside `data/`.
-- Selecting an Original auto-mirrors the Modified slot to the same
-  file (a copy of the bin in memory; edits to Modified never alter
-  Original). You can swap Modified to a different bin afterwards.
-- **Export modified...** suggests `<orig>_modified.bin` as the default
-  filename so you don't overwrite the original on disk.
-
-**Editing**
-
-- Double-click a cell to edit its value (written back as LE u16).
-- Select a region in the table, **right-click -> Set value...** to
-  write a single value into every selected cell at once (bulk edit).
-- **Copy ORI -> MOD** restores the selected map's original values
-  into the modified bin.
-
-## Project layout
-
-```
-src/core/   DrtParser, BinFile (LE/BE read+write), MapData (LE row-major)
-src/model/  DriverModel, MapDefinition, AxisDefinition, MapCategory,
-            DriverNames (canonical name + override table)
-src/gui/    MainWindow, DriverTreeWidget, MapTableWidget,
-            MapGraphWidget, AppPaths
-data/       Three Jeep 2.7 CRD calibrations + sample bins (see data/README.md)
+BinFile: 3 protected snapshot(s) registered
+BinFile::saveFile: restored 3 protected region(s) before writing <path>
 ```
 
-## Building
+---
 
-`build.sh` keeps the project directory clean by writing build output
-into a sibling `EcuParser-build/` directory. The .pro file routes
-release and debug artefacts into separate sub-directories so both
-configurations can co-exist:
+## CLI mode
 
-```bash
-./build.sh                              # release build
-```
-
-Run it from the project directory (so it can find `data/`):
-
-```bash
-cd EcuParser
-../EcuParser-build/release/EcuParser
-```
-
-**Qt Creator** users: the .pro file routes per-configuration output
-into the right sub-directories automatically. With a build directory
-of e.g. `build-EcuParser/`, the binaries land here:
+The same binary runs headless for batch workflows:
 
 ```
-build-EcuParser/
-|-- Makefile, Makefile.Debug, Makefile.Release
-|-- debug/EcuParser(.exe)        <- Debug build output
-|   `-- .obj, .moc, ...
-`-- release/EcuParser(.exe)      <- Release build output
-    `-- .obj, .moc, ...
+EcuParser --driver J293_822.drt --bin stock.bin \
+          --apply-stage stages/stage1.json --out tuned.bin
+
+EcuParser --driver J293_822.drt --bin stock.bin --list
+EcuParser --driver J293_822.drt --bin stock.bin --dump 0x076D82
+EcuParser --driver J293_822.drt --bin stock.bin --verify-checksum
 ```
 
-**Manual out-of-source** build:
+---
 
-```bash
-mkdir -p ../EcuParser-build && cd ../EcuParser-build
-qmake6 ../EcuParser/EcuParser.pro CONFIG+=release
-make -j4
-# Binary: ./release/EcuParser
+## Recent changes (v6 → v7)
+
+- All UI strings translated to English; comments cleaned up.
+- Diff summary line now uses coloured HTML chips (amber for torque, pink for power, red/green for fuel) so the headline metrics stand out against the table below.
+- Estimated fuel-consumption projection added to the diff summary using a 5-category weighted model with cruise-zone-aware main injection blending.
+- Torque scale fixed to OM612 reference (400 Nm / 7500 raw, 163 PS @ 4000 rpm) — earlier versions used a placeholder VM Motori reference (295 Nm / 175 PS).
+- 3D surface view: original mesh redrawn as a vivid cyan-blue wireframe (1.6 px stroke, both row and column lines) for clear contrast against the modified surface. 1D maps (torque limiter 19×1) now render as a four-cell-wide ribbon instead of degenerating to a single line.
+- Two new stage packages: Economy (Soft) targeting daily-driver fuel saving with peak torque preserved, and Economy (Hard) targeting aggressive fuel saving with reduced peak torque and dramatically reduced upper-RPM power. Both keep EGR active.
+
+---
+
+## File structure
+
 ```
-
-In-source builds (`qmake6 EcuParser.pro && make` from the project
-root) still work but pollute the source tree; out-of-source is
-recommended.
-
-## Known limits
-
-- Some maps have unreliable DRT dim or axis info because the real
-  values are embedded in the driver. DriverNames lets you override
-  them per map.
-- Some maps have axis breakpoint counts that differ from their
-  declared dim, so the trailing rows or columns may be meaningless.
-- Cell values are raw u16 LE - there is no conversion into physical
-  units (e.g. torque -> Nm, pressure -> mbar).
-- Only u16 cell writes are supported.
+EcuParser/
+├── src/
+│   ├── core/         BinFile, parsers, checksum, stage application
+│   ├── model/        DriverModel, MapDefinition, name overrides
+│   └── gui/          MainWindow, table/graph/3D/diff views, dialogs
+├── data/
+│   ├── *.drt         Driver files (J293_822.drt covers 28F0_100)
+│   ├── stages/       Stage package JSONs
+│   └── *.bin         Sample stock bins
+└── tests/
+```

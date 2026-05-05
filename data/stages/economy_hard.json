@@ -1,0 +1,116 @@
+{
+  "name": "Economy (Hard)",
+  "description": "Aggressive fuel-saving mode. Target: -10%..-15% fuel consumption. Performance is intentionally reduced: peak torque ~370 Nm (-7%), peak power ~135 PS (-17%). The car feels deliberately sluggish - by design, for fuel. Suited for fleet vehicles, long-distance logistics, periods of high fuel prices. Feels too soft for urban use; most beneficial at highway cruise speed (90-110 km/h). EGR stays ON.",
+  "schemas": ["28F0_100"],
+  "edits": [
+    {
+      "map": "torque limiter",
+      "pct": 5,
+      "row_min": 2,
+      "row_max": 3,
+      "max_value": 7500,
+      "comment": "+5% lowest RPM band (1250-1500 rpm). Driver gets enough torque even at very low RPM, upshift reflex strengthens."
+    },
+    {
+      "map": "torque limiter",
+      "pct": -7,
+      "row_min": 4,
+      "row_max": 8,
+      "comment": "-7% peak torque band (1700-2500 rpm). Stock 400 Nm peak drops to ~370 Nm. Curve shape is preserved (whole plateau cut by same percentage), only the apex falls. Performance feel noticeably reduced."
+    },
+    {
+      "map": "torque limiter",
+      "pct": -12,
+      "row_min": 9,
+      "row_max": 12,
+      "comment": "-12% mid-upper RPM (2700-3300 rpm). If driver is on the pedal in this region, they're burning fuel; the torque cut forces them to drive more calmly."
+    },
+    {
+      "map": "torque limiter",
+      "pct": -20,
+      "row_min": 13,
+      "row_max": 16,
+      "comment": "-20% upper RPM (3500-4100 rpm). High-RPM power is severely capped. Driver gives up on revving for acceleration - the largest single contributor to the fuel-consumption curve."
+    },
+    {
+      "map": "rail pressure",
+      "pct": 12,
+      "row_min": 3,
+      "col_min": 5,
+      "max_value": 14000,
+      "comment": "+12% rail pressure across a wide region. Very fine fuel spray, more complete and efficient combustion. Cap 1400 bar (CP1 practical upper limit)."
+    },
+    {
+      "map": "turbo pressure",
+      "pct": 5,
+      "row_min": 3,
+      "row_max": 6,
+      "col_min": 4,
+      "col_max": 9,
+      "max_value": 2400,
+      "comment": "+5% boost low-mid RPM. Strong low-RPM torque support = early upshifts. Cap 2400 mbar (turbo-safe)."
+    },
+    {
+      "map": "turbo pressure",
+      "pct": -5,
+      "row_min": 8,
+      "col_min": 6,
+      "comment": "-5% boost upper RPM. Pedal-down feels turbo-starved - driver doesn't want to accelerate, calms down."
+    },
+    {
+      "map": "injection at part throttle",
+      "pct": 4,
+      "row_min": 4,
+      "row_max": 7,
+      "col_min": 4,
+      "col_max": 8,
+      "comment": "+4% main fuel in cruise band (1700-2300 rpm at moderate load). This is the highway cruise zone - small extra fuel combined with boost gives better cruise efficiency = less pumping loss from a more open throttle."
+    },
+    {
+      "map": "injection at part throttle",
+      "pct": -10,
+      "row_min": 11,
+      "col_min": 11,
+      "comment": "-10% main fuel at high RPM + high load. 'Acceleration' performance is markedly reduced - eco driving becomes effectively mandatory."
+    },
+    {
+      "map": "fuel during acceleration",
+      "pct": -15,
+      "col_min": 5,
+      "comment": "-15% transient fuel. When driver punches the pedal the engine feels almost 'unresponsive'. Classic eco-mode character."
+    },
+    {
+      "map": "fuel during acceleration (Map 2)",
+      "pct": -12,
+      "col_min": 5,
+      "comment": "-12% on the secondary transient map. Consistent eco character."
+    }
+  ],
+  "options": [
+    {
+      "id": "egr_protect",
+      "label": "Keep EGR active (REQUIRED for Economy mode)",
+      "description": "EGR is the heart of Economy mode. It recycles exhaust gas, lowers combustion temperature, reduces NOx production, and net-reduces fuel consumption. EGR-off made sense in Stage 1/Stage 2 (performance-focused, extra fuel needs to clear soot elsewhere); in Economy mode EGR-off zeroes the fuel saving. DO NOT enable.",
+      "default": false,
+      "edits": []
+    },
+    {
+      "id": "highway_cruise",
+      "label": "Highway cruise optimisation",
+      "description": "Optional: extra rail pressure and slight boost trim for the 80-110 km/h cruise band (~1900-2300 rpm at moderate load). Lowers consumption on the highway, no effect on urban driving. Enable for fleet / long-haul use.",
+      "default": false,
+      "edits": [
+        {
+          "map": "rail pressure",
+          "pct": 6,
+          "row_min": 5,
+          "row_max": 8,
+          "col_min": 6,
+          "col_max": 10,
+          "max_value": 14000,
+          "comment": "Extra rail pressure in the highway cruise band."
+        }
+      ]
+    }
+  ]
+}

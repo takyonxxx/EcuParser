@@ -97,6 +97,77 @@ bool StagePackage::loadFromJson(const QString &path,
     return true;
 }
 
+bool StagePackage::saveToJson(const QString &path, QString *errorOut) const
+{
+    auto fail = [&](const QString &m) {
+        if (errorOut) *errorOut = m;
+        return false;
+    };
+
+    // Build the JSON document mirroring the loadFromJson() schema. We
+    // emit only the fields with non-default values so the resulting
+    // file stays small and human-readable. Round-trip with loadFromJson
+    // is exact for the fields we serialise.
+    auto editToObject = [](const StageEdit &e) -> QJsonObject {
+        QJsonObject o;
+        o.insert(QStringLiteral("map"), e.mapName);
+        if (e.pctChange != 0.0)
+            o.insert(QStringLiteral("pct"), e.pctChange);
+        if (e.rowMin >= 0) o.insert(QStringLiteral("row_min"), e.rowMin);
+        if (e.rowMax >= 0) o.insert(QStringLiteral("row_max"), e.rowMax);
+        if (e.colMin >= 0) o.insert(QStringLiteral("col_min"), e.colMin);
+        if (e.colMax >= 0) o.insert(QStringLiteral("col_max"), e.colMax);
+        if (e.maxValue >= 0) o.insert(QStringLiteral("max_value"), e.maxValue);
+        if (e.setValue >= 0) o.insert(QStringLiteral("set_value"), e.setValue);
+        if (e.setToMapMax)   o.insert(QStringLiteral("set_to_map_max"), true);
+        if (!e.comment.isEmpty()) o.insert(QStringLiteral("comment"), e.comment);
+        return o;
+    };
+
+    QJsonObject root;
+    root.insert(QStringLiteral("name"), name);
+    if (!description.isEmpty())
+        root.insert(QStringLiteral("description"), description);
+    if (!schemas.isEmpty()) {
+        QJsonArray sa;
+        for (const QString &s : schemas) sa.append(s);
+        root.insert(QStringLiteral("schemas"), sa);
+    }
+
+    QJsonArray editsArr;
+    for (const StageEdit &e : edits) {
+        if (e.mapName.isEmpty()) continue;  // skip incomplete entries
+        editsArr.append(editToObject(e));
+    }
+    root.insert(QStringLiteral("edits"), editsArr);
+
+    if (!options.isEmpty()) {
+        QJsonArray optsArr;
+        for (const StageOption &opt : options) {
+            QJsonObject oo;
+            oo.insert(QStringLiteral("id"), opt.id);
+            if (!opt.label.isEmpty())       oo.insert(QStringLiteral("label"), opt.label);
+            if (!opt.description.isEmpty()) oo.insert(QStringLiteral("description"), opt.description);
+            oo.insert(QStringLiteral("default"), opt.defaultOn);
+            QJsonArray oedits;
+            for (const StageEdit &e : opt.edits)
+                if (!e.mapName.isEmpty()) oedits.append(editToObject(e));
+            oo.insert(QStringLiteral("edits"), oedits);
+            optsArr.append(oo);
+        }
+        root.insert(QStringLiteral("options"), optsArr);
+    }
+
+    const QJsonDocument doc(root);
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+        return fail(QStringLiteral("Cannot open for write: %1").arg(f.errorString()));
+    const QByteArray bytes = doc.toJson(QJsonDocument::Indented);
+    if (f.write(bytes) != bytes.size())
+        return fail(QStringLiteral("Short write"));
+    return true;
+}
+
 QList<QPair<QString, QString>> StagePackage::listAvailable()
 {
     QList<QPair<QString, QString>> out;

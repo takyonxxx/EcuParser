@@ -60,7 +60,108 @@ struct AxisInfo {
     int     rowCount = 0;
     int     colCount = 0;
     QString units;
+    // MATH equation as written in the XDF, e.g. "X * 0.1" or "X/10+5".
+    // Empty when the XDF doesn't supply one. Parsed by parseLinearMath()
+    // below; anything more complex than a*X+b stays empty (the caller
+    // falls back to raw u16 display).
+    QString mathEquation;
 };
+
+// Parse a simple linear MATH equation into (scale, offset). Recognised
+// forms (case-insensitive, whitespace-tolerant):
+//   X
+//   X * a            X*a              a * X            a*X
+//   X / c            X/c
+//   X + b            X-b              X * a + b
+//   X / c + b        a * X + b        a*X+b
+//
+// Anything else returns false and leaves scale/offset untouched. We
+// keep the parser deliberately small - real-world XDFs use linear
+// scaling for ~95% of maps; the long tail (lookup tables, multi-axis
+// math) doesn't fit a 1D linear scale anyway and stays raw.
+bool parseLinearMath(const QString &eqIn, double *scaleOut, double *offsetOut)
+{
+    QString eq = eqIn.simplified();
+    if (eq.isEmpty()) return false;
+    // Normalise: strip all spaces, lowercase the variable.
+    eq.remove(QLatin1Char(' '));
+    eq.replace(QLatin1Char('x'), QLatin1Char('X'));
+
+    // Bail on operators we don't handle (parens, ^, %, etc).
+    static const char kForbidden[] = "()%^,";
+    for (char c : kForbidden) {
+        if (eq.contains(QLatin1Char(c))) return false;
+    }
+
+    // Find X. Must appear exactly once - "X*X" isn't linear.
+    const int xCount = eq.count(QLatin1Char('X'));
+    if (xCount != 1) return false;
+
+    // Split eq at the X position into a "before X" prefix and an
+    // "after X" suffix. Each may contain a leading '*' or '/' (for
+    // before) or a trailing '*' or '/' / leading '+' or '-' for after.
+    const int xPos = eq.indexOf(QLatin1Char('X'));
+    QString before = eq.left(xPos);
+    QString after  = eq.mid(xPos + 1);
+
+    double scale  = 1.0;
+    double offset = 0.0;
+
+    // Process "before": acceptable patterns are "" or "a*" (constant
+    // factor). We parse a leading optional sign, a number, then
+    // require a '*' delimiter.
+    if (!before.isEmpty()) {
+        QChar last = before.back();
+        if (last != QLatin1Char('*') && last != QLatin1Char('/')) return false;
+        // The "before" token represents a multiplier (or a divisor if
+        // future XDFs ever write "10/X" - we don't accept that since
+        // it's nonlinear in X). Reject divisor-before-X.
+        if (last == QLatin1Char('/')) return false;
+        const QString numStr = before.chopped(1);
+        bool ok = false;
+        const double v = numStr.toDouble(&ok);
+        if (!ok) return false;
+        scale *= v;
+    }
+
+    // Process "after": acceptable patterns are "", "*a", "/c", "+b",
+    // "-b", "*a+b", "*a-b", "/c+b", "/c-b". We tokenise greedily.
+    while (!after.isEmpty()) {
+        const QChar op = after.front();
+        after.remove(0, 1);
+        // Find the next op (or end of string).
+        int nextOp = -1;
+        for (int i = 0; i < after.size(); ++i) {
+            const QChar c = after.at(i);
+            if (c == QLatin1Char('+') || c == QLatin1Char('-')
+                || c == QLatin1Char('*') || c == QLatin1Char('/')) {
+                // Allow leading '-' / '+' as part of a number ONLY at i==0;
+                // but at i==0 we've already consumed the lead op above.
+                nextOp = i;
+                break;
+            }
+        }
+        const QString tokStr = (nextOp >= 0) ? after.left(nextOp) : after;
+        after = (nextOp >= 0) ? after.mid(nextOp) : QString();
+
+        bool ok = false;
+        const double v = tokStr.toDouble(&ok);
+        if (!ok) return false;
+
+        if (op == QLatin1Char('*'))      scale  *= v;
+        else if (op == QLatin1Char('/')) {
+            if (v == 0.0) return false;
+            scale /= v;
+        }
+        else if (op == QLatin1Char('+')) offset += v;
+        else if (op == QLatin1Char('-')) offset -= v;
+        else return false;
+    }
+
+    if (scaleOut)  *scaleOut  = scale;
+    if (offsetOut) *offsetOut = offset;
+    return true;
+}
 
 AxisInfo readAxis(QXmlStreamReader &xr)
 {
@@ -87,6 +188,19 @@ AxisInfo readAxis(QXmlStreamReader &xr)
             // indexcount can fill in a missing rowcount when EMBEDDEDDATA
             // is absent (e.g. the dummy y axis on a 1D table).
             if (a.rowCount == 0) a.rowCount = n;
+        } else if (en == QStringLiteral("MATH")) {
+            // <MATH equation="X * 0.1" /> - the equation attribute is
+            // the linear formula applied to raw cell values to produce
+            // physical units. We capture it verbatim and parse later
+            // (parseLinearMath) so the MapDefinition can carry scale +
+            // offset for the table widget to display.
+            a.mathEquation = xr.attributes()
+                                 .value(QStringLiteral("equation")).toString();
+            // MATH typically has a child <VAR id="X" /> tag; we don't
+            // need it (we already assume X). readElementText would eat
+            // it anyway. Using readNextStartElement loop instead would
+            // be cleaner but readElementText() is fine since MATH has
+            // no additional text payload we care about.
         }
     }
     return a;
@@ -140,6 +254,30 @@ bool readTable(QXmlStreamReader &xr,
     if (out->cellSize == 0) out->cellSize = 2;
     out->addresses.clear();
     out->addresses.append(zAxis.address);
+
+    // === MATH equation parsing ===
+    // If the z-axis carries a <MATH equation="..."/> formula and it
+    // fits the linear form a*X+b (which most XDFs use), record the
+    // scale/offset/unit on the MapDefinition so the table widget can
+    // show physical units. Editing always operates on raw u16 - the
+    // MATH only affects display.
+    if (!zAxis.mathEquation.isEmpty()) {
+        double scale = 1.0;
+        double offset = 0.0;
+        if (parseLinearMath(zAxis.mathEquation, &scale, &offset)) {
+            out->scale  = scale;
+            out->offset = offset;
+            if (!zAxis.units.isEmpty()) out->unit = zAxis.units;
+        }
+        // If the parse failed (non-linear formula) we leave scale=1,
+        // offset=0, unit empty so the user sees raw u16 cells - the
+        // safe degraded behaviour.
+    } else if (!zAxis.units.isEmpty()) {
+        // No MATH but units present: at least record the unit string
+        // so the title and tooltips can show "(unit: bar)" even
+        // without conversion.
+        out->unit = zAxis.units;
+    }
 
     // Axis breakpoints: stored in xAxis/yAxis EMBEDDEDDATA addresses
     // when present. We capture them as AxisDefinition pointers; the

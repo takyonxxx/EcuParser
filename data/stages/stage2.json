@@ -1,63 +1,108 @@
 {
   "name": "Stage 2",
-  "description": "Aggressive tune. ~+30% torque. Requires healthy injectors; intercooler upgrade strongly recommended; exhaust de-restriction recommended. NOT for stock turbo at sustained full load.",
-  "schemas": ["28F0_100"],
+  "description": "Aggressive market-level tune (~520 Nm / 230 PS, +30% torque / +41% power). REQUIRES hardware modifications: intercooler upgrade is MANDATORY at this boost level. Strongly recommended: 3-inch turbo-back exhaust, decat downpipe. Stock turbo (Garrett GT2052V) operates at the edge of its safe map - reduce highway full-load duration. Injectors should be in healthy condition (verified spray pattern). NOT for stock OEM hardware in original condition.",
+  "schemas": [
+    "28F0_100"
+  ],
   "edits": [
     {
-      "map": "injection at part throttle",
-      "pct": 32,
-      "row_min": 6,
-      "col_min": 9,
-      "max_value": 9500,
-      "comment": "+32% main fueling at mid-high RPM x mid-high load."
-    },
-    {
-      "map": "rail pressure",
-      "pct": 17,
-      "row_min": 3,
-      "col_min": 9,
-      "max_value": 28000,
-      "comment": "+17% rail pressure for finer atomisation under bigger fueling. Capped 28000."
-    },
-    {
-      "map": "fuel during acceleration",
-      "pct": 14,
-      "col_min": 7,
-      "comment": "+14% transient fueling, broader col range."
-    },
-    {
-      "map": "fuel during acceleration (Map 2)",
-      "pct": 22,
-      "col_min": 7,
-      "comment": "+22% on secondary acceleration map."
-    },
-    {
-      "map": "turbo pressure",
-      "pct": 10,
-      "row_min": 3,
-      "col_min": 5,
-      "max_value": 1900,
-      "comment": "+10% boost target across wider RPM x load region. Capped 1900."
+      "map": "torque limiter",
+      "pct": 40,
+      "row_min": 4,
+      "row_max": 8,
+      "max_value": 9750,
+      "comment": "Peak torque band (1700-2500 rpm). Targets 9750 raw cap (~520 Nm). Cells already at 7500 stock saturate at cap; cell 8 lifts proportionally (+40%)."
     },
     {
       "map": "torque limiter",
-      "pct": 50,
+      "pct": 30,
+      "row_min": 9,
+      "row_max": 12,
+      "max_value": 9750,
+      "comment": "Mid-upper RPM (2700-3300 rpm). +30% with 9750 cap. Wide torque shelf - feels like a much bigger engine on hills and overtakes."
+    },
+    {
+      "map": "torque limiter",
+      "pct": 20,
+      "row_min": 13,
+      "row_max": 16,
+      "comment": "Upper RPM (3500-4100 rpm). +20% on the power-band ceiling. Real torque here is set by injection x boost combination."
+    },
+    {
+      "map": "torque limiter",
+      "pct": 10,
+      "row_min": 17,
+      "row_max": 17,
+      "comment": "Pre-rev-limit (4300 rpm). +10% gentle lift - keeps top-end smooth without flat-spot."
+    },
+    {
+      "map": "turbo pressure",
+      "pct": 20,
       "row_min": 4,
+      "row_max": 9,
+      "col_min": 5,
+      "col_max": 11,
+      "max_value": 2750,
+      "comment": "+20% boost target at peak band. Cap 2750 mbar absolute (~1.75 bar relative) - the practical upper limit for the GT2052V before turbo overspeed. INTERCOOLER UPGRADE MANDATORY at this boost; stock IC heat-soaks above ~2400 mbar."
+    },
+    {
+      "map": "turbo pressure",
+      "pct": 12,
+      "row_min": 10,
+      "row_max": 11,
+      "col_min": 6,
+      "col_max": 11,
+      "max_value": 2750,
+      "comment": "Lower boost lift in upper RPM band to protect turbo from overspeed - VNT vanes closing too aggressively at high airflow damages thrust bearings."
+    },
+    {
+      "map": "rail pressure",
+      "pct": 18,
+      "row_min": 3,
+      "col_min": 8,
+      "max_value": 14500,
+      "comment": "+18% rail pressure (rows 3..15, cols 8..15). Cap 14500 raw (~1450 bar) is the practical limit for the stock CP1 high-pressure pump. Higher pressure improves atomisation under +28% fuel quantity, reducing smoke."
+    },
+    {
+      "map": "injection at part throttle",
+      "pct": 28,
+      "row_min": 5,
+      "col_min": 9,
       "max_value": 9500,
-      "comment": "+50% torque limit ceiling, capped 9500."
+      "comment": "+28% main fueling (rows 5..15, cols 9..15). Wider RPM range than Stage 1 to support peak power lift. Cap 9500 prevents smoke-limit excursions on poor fuel batches. Verify injector condition before applying."
+    },
+    {
+      "map": "injection at part throttle (Map 1)",
+      "pct": 18,
+      "row_min": 8,
+      "col_min": 12,
+      "max_value": 9500,
+      "comment": "+18% on Boost x RPM injection map at high boost x high RPM. This is the secondary fueling layer that scales with actual measured boost - critical for clean peak power delivery. Cap 9500."
+    },
+    {
+      "map": "fuel during acceleration",
+      "pct": 18,
+      "col_min": 6,
+      "comment": "+18% transient fueling, broad load range. Reduces turbo lag dramatically - essential for Stage 2 driveability."
+    },
+    {
+      "map": "fuel during acceleration (Map 2)",
+      "pct": 25,
+      "col_min": 7,
+      "comment": "+25% on secondary acceleration map. Matched to main map's broader scaling for Stage 2 power."
     }
   ],
   "options": [
     {
       "id": "egr_off",
-      "label": "EGR off (recommended for Stage 2)",
-      "description": "Software EGR delete via phase-of-injection saturation. Almost mandatory at Stage 2 power levels - the increased fueling produces more soot and EGR-on operation will rapidly clog the intake.",
+      "label": "EGR off (MANDATORY for Stage 2)",
+      "description": "Software EGR delete via phase-of-injection saturation. ABSOLUTELY REQUIRED at Stage 2 fueling levels - the additional fuel produces significantly more soot, and EGR-on operation will clog the intake manifold and EGR valve within months. No hardware blanking plate required (ECU-only delete).",
       "default": true,
       "edits": [
         {
           "map": "phase of injection",
           "set_to_map_max": true,
-          "comment": "Flatten phase-of-injection map to its factory maximum."
+          "comment": "Flatten phase-of-injection map to its factory maximum to disengage EGR loop."
         }
       ]
     }

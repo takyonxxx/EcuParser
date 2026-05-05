@@ -55,8 +55,36 @@ public:
     // 1 = clamp to first address only (e.g. (Boost x RPM) maps which the
     // .drt over-lists). Returns 0 for unknown drivers/maps so they keep
     // default behaviour.
+    //
+    // When "expert mode" is enabled via setExpertMode(true), this method
+    // returns 0 unconditionally - so the user sees every instance the
+    // .drt records, including shadow addresses the reference tool hides.
     static int maxInstances(const QString &schemaId,
                             const MapDefinition &map);
+
+    // Toggle whether maxInstances() honours the per-map cap. Off by
+    // default (matches the reference tool's display). Persists for the
+    // lifetime of the process.
+    static void setExpertMode(bool on);
+    static bool expertMode();
+
+    // Optional linear unit conversion for display: physical = raw*scale + offset.
+    // Returns scale=1, offset=0, unit="" when no override is set so callers
+    // can apply unconditionally. Editing always operates on raw u16; this is
+    // a display-time conversion only. Verified physical mappings for the
+    // J293_822 schema (Jeep WJ 2.7 CRD EDC15C, Mercedes OM612 engine):
+    //   rail pressure      : raw / 10            -> bar      (0x07ADD2 max ~1350 bar)
+    //   turbo pressure     : raw                 -> mbar     (factory range 1000..2250)
+    //   torque limiter     : raw * 400 / 7500    -> Nm proxy (peak 7500 -> 400 Nm OEM)
+    //   phase of injection : raw / 100           -> degCA    (typical EDC15 scaling)
+    static double scaleFor (const QString &schemaId, const MapDefinition &map);
+    static double offsetFor(const QString &schemaId, const MapDefinition &map);
+    static QString unitFor (const QString &schemaId, const MapDefinition &map);
+
+    // Mutates map's scale/offset/unit fields in-place from the override
+    // table. Used right after a parser fills addresses+typecode so the rest
+    // of the app sees physical-unit-aware MapDefinition objects.
+    static void applyUnitOverride(const QString &schemaId, MapDefinition *map);
 };
 
 } // namespace EcuParser

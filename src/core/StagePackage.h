@@ -20,6 +20,7 @@
 #include <QString>
 #include <QStringList>
 #include <QList>
+#include <QSet>
 #include <algorithm>
 
 namespace EcuParser {
@@ -99,10 +100,180 @@ struct StagePackage
                              StagePackage *out,
                              QString *errorOut = nullptr);
 
+    // Save this package to a JSON file on disk in the same format that
+    // loadFromJson() reads. Used by the custom tune editor to persist a
+    // user-built stage to data/stages/<name>.json so it shows up in the
+    // Apply Stage picker on next launch.
+    bool saveToJson(const QString &path, QString *errorOut = nullptr) const;
+
     // Convenience: list every "*.json" file under data/stages/ as
     // (display-name, file-path) pairs sorted by display-name.
     static QList<QPair<QString, QString>> listAvailable();
 };
+
+// Per-edit summary returned by previewStage(). One entry per StageEdit
+// the package would actually run (skipped edits don't appear here).
+// Stage 2's silent cap-clipping bug is exposed in clippedCount: an edit
+// that asks for +10% but caps to a value below the source map's max
+// will report most cells unchanged or *decreased*, instantly visible.
+struct StageEditPreview
+{
+    QString mapName;
+    double  pctRequested = 0.0;
+    int     instances    = 0;
+    int     cellsInWindow = 0;   // cells touched by this edit's window
+    int     changedCount  = 0;   // cells whose value actually moves
+    int     clippedCount  = 0;   // cells whose new value would have been
+                                  // higher than maxValue and got capped
+    int     decreasedCount = 0;  // cells whose new value is LESS than orig
+                                  // (sign of cap < orig.max, i.e. bug)
+    qint64  sumOldRaw    = 0;
+    qint64  sumNewRaw    = 0;
+    int     minOld       = 0;
+    int     maxOld       = 0;
+    int     minNew       = 0;
+    int     maxNew       = 0;
+    QString comment;
+};
+
+struct StagePreview
+{
+    QList<StageEditPreview> edits;     // mirrors stage.edits order
+    QStringList             warnings;  // schema-mismatch, missing-map, etc.
+    int totalCellsTouched = 0;         // sum across edits
+    int totalCellsClipped = 0;
+    int totalCellsDecreased = 0;
+};
+
+// Preview a stage application without writing anything to the target bin.
+// Returns a per-edit summary suitable for a confirmation dialog. When
+// `enabledOptionIds` is non-empty, those options' edits are folded in.
+inline StagePreview previewStage(const StagePackage &stage,
+                                 const DriverModel  &driver,
+                                 const BinFile      &source,
+                                 const QSet<QString> &enabledOptionIds = {})
+{
+    StagePreview out;
+
+    if (!stage.schemas.isEmpty()
+        && !stage.schemas.contains(driver.schemaId)) {
+        out.warnings.append(QStringLiteral("Schema mismatch: package supports %1, driver is %2")
+                                .arg(stage.schemas.join(QStringLiteral(", ")),
+                                     driver.schemaId));
+        return out;
+    }
+
+    // Build the effective edits list (core + enabled options).
+    QList<StageEdit> allEdits = stage.edits;
+    for (const StageOption &opt : stage.options) {
+        if (enabledOptionIds.contains(opt.id))
+            allEdits.append(opt.edits);
+    }
+
+    for (const StageEdit &edit : allEdits) {
+        const MapDefinition *target_map = nullptr;
+        for (const MapDefinition &m : driver.maps) {
+            if (DriverNames::displayName(driver.schemaId, m) == edit.mapName) {
+                target_map = &m;
+                break;
+            }
+        }
+        if (!target_map) {
+            out.warnings.append(QStringLiteral("Map not found: '%1'").arg(edit.mapName));
+            continue;
+        }
+        if (target_map->addresses.isEmpty()) continue;
+
+        const int effDX = DriverNames::effectiveDimX(driver.schemaId, *target_map);
+        const int effDY = DriverNames::effectiveDimY(driver.schemaId, *target_map);
+        if (effDX <= 0 || effDY <= 0) continue;
+
+        int instances = target_map->addresses.size();
+        const int cap = DriverNames::maxInstances(driver.schemaId, *target_map);
+        if (cap > 0) instances = std::min(instances, cap);
+
+        const int rMin = (edit.rowMin < 0) ? 0          : edit.rowMin;
+        const int rMax = (edit.rowMax < 0) ? effDX - 1  : edit.rowMax;
+        const int cMin = (edit.colMin < 0) ? 0          : edit.colMin;
+        const int cMax = (edit.colMax < 0) ? effDY - 1  : edit.colMax;
+        const double scale = 1.0 + edit.pctChange / 100.0;
+        const int strideY = effDY;
+
+        // Pre-scan for setToMapMax (uses source map's own maximum).
+        int mapMaxValue = 0;
+        if (edit.setToMapMax) {
+            for (int r = 0; r < effDX; ++r) {
+                for (int c = 0; c < effDY; ++c) {
+                    const int idx = r * strideY + c;
+                    const quint32 off = target_map->addresses.first()
+                                      + quint32(idx * target_map->cellSize);
+                    bool ok = false;
+                    const quint16 v = source.readU16LE(off, &ok);
+                    if (ok && int(v) > mapMaxValue) mapMaxValue = int(v);
+                }
+            }
+        }
+
+        StageEditPreview ep;
+        ep.mapName = edit.mapName;
+        ep.pctRequested = edit.pctChange;
+        ep.instances = instances;
+        ep.comment = edit.comment;
+        ep.minOld = ep.minNew = 65535;
+        ep.maxOld = ep.maxNew = 0;
+        bool seen = false;
+
+        for (int inst = 0; inst < instances; ++inst) {
+            const quint32 base = target_map->addresses.at(inst);
+            for (int r = std::max(0, rMin); r <= std::min(effDX - 1, rMax); ++r) {
+                for (int c = std::max(0, cMin); c <= std::min(effDY - 1, cMax); ++c) {
+                    const int idx = r * strideY + c;
+                    const quint32 off = base + quint32(idx * target_map->cellSize);
+                    bool ok = false;
+                    const quint16 origV = source.readU16LE(off, &ok);
+                    if (!ok) continue;
+
+                    int newV = origV;
+                    if (edit.setToMapMax) {
+                        newV = mapMaxValue;
+                    } else if (edit.setValue >= 0) {
+                        newV = edit.setValue;
+                    } else {
+                        newV = int(double(origV) * scale + 0.5);
+                    }
+                    int unclamped = newV;
+                    if (edit.maxValue > 0 && newV > edit.maxValue)
+                        newV = edit.maxValue;
+                    if (newV < 0) newV = 0;
+                    if (newV > 65535) newV = 65535;
+
+                    ++ep.cellsInWindow;
+                    if (newV != int(origV)) ++ep.changedCount;
+                    if (unclamped > newV) ++ep.clippedCount;
+                    if (newV < int(origV)) ++ep.decreasedCount;
+                    ep.sumOldRaw += origV;
+                    ep.sumNewRaw += newV;
+                    if (!seen) {
+                        ep.minOld = ep.maxOld = origV;
+                        ep.minNew = ep.maxNew = newV;
+                        seen = true;
+                    } else {
+                        ep.minOld = std::min(ep.minOld, int(origV));
+                        ep.maxOld = std::max(ep.maxOld, int(origV));
+                        ep.minNew = std::min(ep.minNew, newV);
+                        ep.maxNew = std::max(ep.maxNew, newV);
+                    }
+                }
+            }
+        }
+
+        out.totalCellsTouched   += ep.changedCount;
+        out.totalCellsClipped   += ep.clippedCount;
+        out.totalCellsDecreased += ep.decreasedCount;
+        out.edits.append(ep);
+    }
+    return out;
+}
 
 // Apply a stage package to one bin. Reads cells from `source` (typically
 // the Original) and writes the percentage-shifted values into `target`

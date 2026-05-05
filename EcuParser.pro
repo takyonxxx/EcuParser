@@ -1,4 +1,4 @@
-QT       = core gui widgets
+QT       = core gui widgets sql
 CONFIG  += c++17
 CONFIG  -= app_bundle
 
@@ -24,6 +24,8 @@ HEADERS += \
     src/core/BinFile.h \
     src/core/MapData.h \
     src/core/StagePackage.h \
+    src/core/Checksum.h \
+    src/core/TuneLogger.h \
     src/core/XdfParser.h \
     src/model/AxisDefinition.h \
     src/model/MapDefinition.h \
@@ -34,6 +36,13 @@ HEADERS += \
     src/gui/DriverTreeWidget.h \
     src/gui/MapTableWidget.h \
     src/gui/MapGraphWidget.h \
+    src/gui/DiffViewWidget.h \
+    src/gui/ChecksumDialog.h \
+    src/gui/CustomTuneDialog.h \
+    src/gui/StagePreviewDialog.h \
+    src/gui/Surface3DWidget.h \
+    src/gui/TuneLogDialog.h \
+    src/gui/UndoCommands.h \
     src/gui/AppPaths.h
 
 SOURCES += \
@@ -41,6 +50,8 @@ SOURCES += \
     src/core/BinFile.cpp \
     src/core/MapData.cpp \
     src/core/StagePackage.cpp \
+    src/core/Checksum.cpp \
+    src/core/TuneLogger.cpp \
     src/core/XdfParser.cpp \
     src/model/MapCategory.cpp \
     src/model/DriverNames.cpp \
@@ -48,6 +59,13 @@ SOURCES += \
     src/gui/DriverTreeWidget.cpp \
     src/gui/MapTableWidget.cpp \
     src/gui/MapGraphWidget.cpp \
+    src/gui/DiffViewWidget.cpp \
+    src/gui/ChecksumDialog.cpp \
+    src/gui/CustomTuneDialog.cpp \
+    src/gui/StagePreviewDialog.cpp \
+    src/gui/Surface3DWidget.cpp \
+    src/gui/TuneLogDialog.cpp \
+    src/gui/UndoCommands.cpp \
     src/gui/AppPaths.cpp \
     src/gui/main.cpp
 
