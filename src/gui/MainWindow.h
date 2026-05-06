@@ -61,6 +61,17 @@ private slots:
     void onBrowseDriver();
     void onBrowseOriginalBin();
     void onBrowseModifiedBin();
+    // Open file dialog to select a reference bin. The reference bin
+    // is an additional known-good calibration (stock from another
+    // matching ECU OR a previously-tuned bin a commercial checksum
+    // tool already corrected) used as a source of valid checksum
+    // words at export time. Optional - exports still work without it
+    // as long as the modifications stay byte-identical to the
+    // original within each block.
+    void onBrowseReferenceBin();
+    // Drop the loaded reference bin (if any). Restores the "single
+    // reference (original only)" mode of operation.
+    void onClearReferenceBin();
 
 private:
     void buildUi();
@@ -68,14 +79,13 @@ private:
     bool loadDriver(const QString &path);
     bool loadOriginalBin(const QString &path);
     bool loadModifiedBin(const QString &path);
+    bool loadReferenceBin(const QString &path);
     void refreshTitle();
     void refreshCurrentMap();
-    // Push the original bin's bytes for the schema's protected
-    // regions into the modified bin's snapshot list. Called whenever
-    // either bin or the driver changes. The actual restore happens
-    // automatically inside BinFile::saveFile() at write time. See
-    // BinFile::setProtectedSnapshots() for the design rationale.
-    void refreshProtectedSnapshots();
+    // Refresh the status bar / labels related to the reference bin
+    // (loaded path, size, mismatch warnings). Called after the
+    // reference bin is loaded or cleared.
+    void refreshReferenceBinUi();
 
 public:
     // Public hooks for QUndoCommand subclasses (CellEditCommand,
@@ -129,6 +139,14 @@ public:
     std::unique_ptr<DriverModel> m_driver;
     std::unique_ptr<BinFile>     m_origBin;
     std::unique_ptr<BinFile>     m_modBin;
+    // Optional reference bin: another known-good calibration whose
+    // checksum words can be copied into the modified bin at export
+    // time when the modified block bytes match the reference's
+    // block bytes. See Checksum.h for the rationale (Bosch CRC
+    // algorithm not reverse-engineered, so we lean on a real bin's
+    // pre-validated stored values rather than computing a wrong one).
+    std::unique_ptr<BinFile>     m_refBin;
+    QString m_refBinPath;
 
     // Path of the currently loaded modified bin (used as default for
     // Save As).

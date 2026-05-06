@@ -211,6 +211,31 @@ int run(const QCoreApplication &app)
         QStringLiteral("Repair every checksum range and write to --out"));
     QCommandLineOption optInplace(QStringLiteral("inplace"),
         QStringLiteral("With --repair-checksum, overwrite the input bin"));
+    QCommandLineOption optOrigBin(QStringLiteral("orig-bin"),
+        QStringLiteral(
+            "Original (stock) bin used as the source of valid checksum "
+            "words for blocks whose bytes are unchanged. Required for "
+            "--repair-checksum."),
+        QStringLiteral("file"));
+    QCommandLineOption optRefBin(QStringLiteral("ref-bin"),
+        QStringLiteral(
+            "Optional reference bin (a known-good tuned bin). At repair "
+            "time its checksum word is copied for any block whose bytes "
+            "exactly match the reference's bytes."),
+        QStringLiteral("file"));
+    QCommandLineOption optPartial(QStringLiteral("partial-metrics"),
+        QStringLiteral(
+            "Print ECM-Titanium-style analytic checksums (Checksum, "
+            "Compl, Even, Odd, 16bit LH/HL, DWord, 32bit #1..#4) for "
+            "the given byte range of --bin. Range defaults to the "
+            "whole file."));
+    QCommandLineOption optStart(QStringLiteral("start"),
+        QStringLiteral("Start offset for --partial-metrics (hex/dec, default 0)"),
+        QStringLiteral("offset"));
+    QCommandLineOption optEnd(QStringLiteral("end"),
+        QStringLiteral("End offset (inclusive) for --partial-metrics "
+                       "(hex/dec, default last byte)"),
+        QStringLiteral("offset"));
     cli.addOption(optDriver);
     cli.addOption(optBin);
     cli.addOption(optList);
@@ -220,12 +245,19 @@ int run(const QCoreApplication &app)
     cli.addOption(optVerify);
     cli.addOption(optRepair);
     cli.addOption(optInplace);
+    cli.addOption(optOrigBin);
+    cli.addOption(optRefBin);
+    cli.addOption(optPartial);
+    cli.addOption(optStart);
+    cli.addOption(optEnd);
     cli.process(app);
 
     const QString driverPath = cli.value(optDriver);
     const QString binPath    = cli.value(optBin);
     const QString stagePath  = cli.value(optApplyStage);
     const QString outPath    = cli.value(optOut);
+    const QString origBinPath = cli.value(optOrigBin);
+    const QString refBinPath  = cli.value(optRefBin);
 
     // Parse driver if given. Required for --list, --dump, --apply-stage.
     std::optional<EcuParser::DriverModel> driver;
@@ -340,38 +372,44 @@ int run(const QCoreApplication &app)
         effective.options.clear();
         // Always start from a fresh copy of the original (idempotent).
         EcuParser::BinFile target(bin.raw());
-        // Set up protected-region snapshots so the calibration
-        // checksum word at 0x07BD7C and other identification stamps
-        // are preserved verbatim from the source bin into the saved
-        // modified bin. Same logic the GUI uses (see
-        // MainWindow::refreshProtectedSnapshots). Without this the
-        // CLI-produced bins would have stock byte content for the
-        // checksum word - which is the desired outcome - but only by
-        // coincidence (since stage edits don't address that range).
-        // The explicit setup makes the guarantee robust against future
-        // stage authors who add edits in that area, and against any
-        // future ChecksumDialog-style "repair" path that might also
-        // be invoked from the CLI.
-        const EcuParser::ChecksumProfile prof =
-            EcuParser::Checksum::profileForSchema(driver->schemaId);
-        if (!prof.protectedRegions.isEmpty()) {
-            QList<QPair<quint32, quint32>> regions;
-            QStringList descs;
-            for (const EcuParser::ProtectedRegion &pr : prof.protectedRegions) {
-                regions.append({pr.startOffset, pr.endOffset});
-                descs.append(pr.description);
-            }
-            target.setProtectedSnapshots(bin.raw(), regions, descs);
-        }
         QStringList warns;
         const int written = EcuParser::applyStage(effective, *driver, bin, &target, &warns);
         for (const auto &w : warns) err << "warn: " << w << "\n";
+
+        // Apply the checksum strategy. CLI mode does not (yet) support
+        // a separate reference bin, so we run with original-only. This
+        // is correct for stages whose edits are all inside Block B's
+        // calibration region but whose ECU-stored CS word is at the
+        // boundary - the original CS is kept (KeepOriginal strategy)
+        // when the modified block bytes happen to be byte-identical to
+        // the original. If a stage actually changes calibration bytes
+        // (the normal case for any meaningful tune), every block
+        // touched will be Unresolvable and applyStrategies returns
+        // false. We surface that as a warning here, write the bin
+        // anyway under a "_needs_checksum_fix" name, and exit with a
+        // non-zero status so CI flows can react.
+        const EcuParser::ChecksumProfile prof =
+            EcuParser::Checksum::profileForSchema(driver->schemaId);
+        bool csOk = true;
+        if (!prof.ranges.isEmpty()) {
+            QStringList csLog;
+            csOk = EcuParser::Checksum::applyStrategies(
+                &target, bin, /*refBin=*/nullptr, prof, &csLog);
+            for (const auto &line : csLog) err << "cks: " << line << "\n";
+        }
         QString destPath = outPath;
         if (destPath.isEmpty()) {
             QFileInfo fi(binPath);
+            QString stem = fi.completeBaseName() + QStringLiteral("_modified");
+            if (!csOk) {
+                stem += QStringLiteral("_needs_checksum_fix");
+                err << "warn: checksum unresolvable - bin needs to be "
+                       "passed through a commercial checksum corrector "
+                       "(WinOLS, ECM Titanium, MPPS, ECU.design online) "
+                       "before flashing.\n";
+            }
             destPath = fi.absolutePath() + QStringLiteral("/")
-                       + fi.completeBaseName() + QStringLiteral("_modified.")
-                       + fi.suffix();
+                       + stem + QStringLiteral(".") + fi.suffix();
         }
         QString serr;
         if (!target.saveFile(destPath, &serr)) {
@@ -395,21 +433,28 @@ int run(const QCoreApplication &app)
             err << "no checksum profile for schema '" << schema << "'\n";
             return 3;
         }
-        const auto status = EcuParser::Checksum::verify(bin, profile);
-        for (int i = 0; i < profile.ranges.size(); ++i) {
-            const auto &r = profile.ranges.at(i);
+        // Verify mode: we have only one bin, so feed it as both
+        // "modified" and "original" to evaluate(). Every block whose
+        // bytes are byte-identical to itself (always true) resolves
+        // to KeepOriginal, and the per-block status reports the
+        // current stored CS at storeOffset. This effectively becomes
+        // a "show me what's stored at every CS location" inspection
+        // tool; a subsequent comparison against another bin's stored
+        // values is the user's job. (We can't compute the CRC, so we
+        // can't say the stored value is "wrong" - only "different
+        // from what another bin has".)
+        const auto status = EcuParser::Checksum::evaluate(
+            bin, bin, /*refBin=*/nullptr, profile);
+        for (int i = 0; i < status.blocks.size(); ++i) {
+            const auto &b = status.blocks.at(i);
             const QString hexStored = QStringLiteral("%1")
-                .arg(status.stored.at(i), 8, 16, QLatin1Char('0')).toUpper();
-            const QString hexComputed = QStringLiteral("%1")
-                .arg(status.computed.at(i), 8, 16, QLatin1Char('0')).toUpper();
-            out << QStringLiteral("  [%1] %2  stored=0x%3 computed=0x%4  %5\n")
+                .arg(b.storedValue, 8, 16, QLatin1Char('0')).toUpper();
+            out << QStringLiteral("  [%1] %2  stored=0x%3\n")
                        .arg(i)
-                       .arg(r.description, -42)
-                       .arg(hexStored, hexComputed,
-                            status.ok.at(i) ? QStringLiteral("OK")
-                                            : QStringLiteral("MISMATCH"));
+                       .arg(b.description, -52)
+                       .arg(hexStored);
         }
-        return status.allOk() ? 0 : 1;
+        return 0;
     }
 
     // --repair-checksum
@@ -418,15 +463,43 @@ int run(const QCoreApplication &app)
             err << "--repair-checksum requires --bin\n";
             return 2;
         }
+        if (origBinPath.isEmpty()) {
+            err << "--repair-checksum requires --orig-bin (the stock bin "
+                   "is the source of valid checksum words for unchanged "
+                   "blocks)\n";
+            return 2;
+        }
         const QString schema = driver ? driver->schemaId : QString();
         const auto profile = EcuParser::Checksum::profileForSchema(schema);
         if (profile.ranges.isEmpty()) {
             err << "no checksum profile for schema '" << schema << "'\n";
             return 3;
         }
+        EcuParser::BinFile origBin;
+        QString operr;
+        if (!origBin.loadFile(origBinPath, &operr)) {
+            err << "orig-bin load failed: " << operr << "\n";
+            return 2;
+        }
+        std::unique_ptr<EcuParser::BinFile> refBin;
+        if (!refBinPath.isEmpty()) {
+            refBin = std::make_unique<EcuParser::BinFile>();
+            QString rerr;
+            if (!refBin->loadFile(refBinPath, &rerr)) {
+                err << "ref-bin load failed: " << rerr << "\n";
+                return 2;
+            }
+        }
         QStringList logLines;
-        const int n = EcuParser::Checksum::repair(&bin, profile, /*dryRun=*/false, &logLines);
+        const bool ok = EcuParser::Checksum::applyStrategies(
+            &bin, origBin, refBin.get(), profile, &logLines);
         for (const auto &ln : logLines) out << "  " << ln << "\n";
+        if (!ok) {
+            err << "checksum repair: at least one block could not be "
+                   "resolved. The bin will be saved but is NOT safe to "
+                   "flash without further correction (see commercial "
+                   "checksum tools).\n";
+        }
         QString destPath = outPath;
         if (destPath.isEmpty()) {
             if (cli.isSet(optInplace)) destPath = binPath;
@@ -440,7 +513,70 @@ int run(const QCoreApplication &app)
             err << "save failed: " << serr << "\n";
             return 2;
         }
-        out << "Repaired " << n << " ranges, written to " << destPath << "\n";
+        out << "Repaired bin written to " << destPath
+            << (ok ? " (all blocks resolved)\n"
+                   : " (with UNRESOLVED blocks - external tool required)\n");
+        return ok ? 0 : 1;
+    }
+
+    // --partial-metrics: ECM-Titanium-style analytic checksums.
+    // Diagnostic output only; not part of the export-safety pipeline.
+    if (cli.isSet(optPartial)) {
+        if (binPath.isEmpty()) {
+            err << "--partial-metrics requires --bin\n";
+            return 2;
+        }
+        // Parse start/end with auto-detect of hex (0x prefix) vs dec.
+        auto parseOffset = [](const QString &s, bool *ok) -> quint32 {
+            if (s.isEmpty()) { if (ok) *ok = false; return 0; }
+            if (s.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) {
+                return s.mid(2).toUInt(ok, 16);
+            }
+            return s.toUInt(ok, 10);
+        };
+        bool sok = true, eok = true;
+        const QString sStr = cli.value(optStart);
+        const QString eStr = cli.value(optEnd);
+        const quint32 start = sStr.isEmpty()
+            ? 0u : parseOffset(sStr, &sok);
+        const quint32 endIncl = eStr.isEmpty()
+            ? quint32(bin.size() - 1) : parseOffset(eStr, &eok);
+        if (!sok || !eok) {
+            err << "--partial-metrics: invalid --start or --end\n";
+            return 2;
+        }
+        if (qsizetype(endIncl) >= bin.size() || endIncl < start) {
+            err << "--partial-metrics: range out of bin (size=0x"
+                << QString::number(bin.size(), 16) << ")\n";
+            return 2;
+        }
+        const auto m = EcuParser::computePartialMetrics(bin, start, endIncl);
+        out << "Partial metrics for [0x"
+            << QString::number(m.startOffset, 16).toUpper().rightJustified(6, QLatin1Char('0'))
+            << "..0x"
+            << QString::number(m.endOffset, 16).toUpper().rightJustified(6, QLatin1Char('0'))
+            << "]\n";
+        auto fmt32 = [](quint32 v) {
+            return QStringLiteral("0x") + QString::number(v, 16)
+                                              .toUpper()
+                                              .rightJustified(8, QLatin1Char('0'));
+        };
+        auto fmt16 = [](quint16 v) {
+            return QStringLiteral("0x") + QString::number(v, 16)
+                                              .toUpper()
+                                              .rightJustified(4, QLatin1Char('0'));
+        };
+        out << "  Checksum (16):    " << fmt16(m.checksum16)       << "\n";
+        out << "  Compl    (16):    " << fmt16(m.complement16)     << "\n";
+        out << "  Even     (16):    " << fmt16(m.even16)           << "\n";
+        out << "  Odd      (16):    " << fmt16(m.odd16)            << "\n";
+        out << "  DWord    (32):    " << fmt32(m.dword32)          << "\n";
+        out << "  16bit LH (32):    " << fmt32(m.sumWordLE)        << "\n";
+        out << "  16bit HL (32):    " << fmt32(m.sumWordBE)        << "\n";
+        out << "  32 bit #1 (BE):   " << fmt32(m.sumDwordBE)       << "\n";
+        out << "  32 bit #2 (sw1):  " << fmt32(m.sumDwordSwapHL)   << "\n";
+        out << "  32 bit #3 (LE):   " << fmt32(m.sumDwordLE)       << "\n";
+        out << "  32 bit #4 (sw2):  " << fmt32(m.sumDwordSwapWord) << "\n";
         return 0;
     }
 
@@ -465,6 +601,7 @@ bool wantsCliMode(int argc, char *argv[])
             || a == QStringLiteral("--apply-stage")
             || a == QStringLiteral("--verify-checksum")
             || a == QStringLiteral("--repair-checksum")
+            || a == QStringLiteral("--partial-metrics")
             || a == QStringLiteral("--help")
             || a == QStringLiteral("-h")
             || a == QStringLiteral("--version"))

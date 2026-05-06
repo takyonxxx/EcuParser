@@ -124,6 +124,24 @@ void MainWindow::buildUi()
     connect(exportAct, &QAction::triggered,
             this, &MainWindow::onExportModifiedBin);
     fileMenu->addSeparator();
+    // Reference bin: optional second known-good calibration used at
+    // export time as a source of valid checksum words. Only useful
+    // when the user has a previously-tuned bin (whose checksum was
+    // computed by a commercial tool and verified to start the ECU)
+    // matching the same edits they want to flash from EcuParser.
+    auto *refLoadAct = fileMenu->addAction(
+        QStringLiteral("Load &reference bin..."));
+    refLoadAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+R")));
+    refLoadAct->setStatusTip(QStringLiteral(
+        "Load a known-good tuned bin to provide valid checksum words "
+        "at export time"));
+    connect(refLoadAct, &QAction::triggered,
+            this, &MainWindow::onBrowseReferenceBin);
+    auto *refClearAct = fileMenu->addAction(
+        QStringLiteral("Clear reference bin"));
+    connect(refClearAct, &QAction::triggered,
+            this, &MainWindow::onClearReferenceBin);
+    fileMenu->addSeparator();
     auto *quitAct = fileMenu->addAction(QStringLiteral("&Quit"));
     quitAct->setShortcut(QKeySequence::Quit);
     connect(quitAct, &QAction::triggered, this, &QMainWindow::close);
@@ -391,10 +409,11 @@ bool MainWindow::loadDriver(const QString &path)
     m_tableView->clearMap();
     m_graphView->clear();
     refreshTitle();
-    // Driver change can change the schema and therefore which protected
-    // regions apply. Refresh the modified bin's snapshot list so the
-    // save-time guard uses the new schema's profile.
-    refreshProtectedSnapshots();
+    // Driver change updates the schema id, which the export-time
+    // checksum logic consults to pick the right profile. No
+    // additional state mutation is needed here - the checksum
+    // strategy is evaluated lazily on export against m_origBin /
+    // m_refBin / m_modBin.
     statusBar()->showMessage(
         QStringLiteral("Driver loaded: %1 (%2 maps, format: %3)")
             .arg(QFileInfo(path).fileName())
@@ -507,12 +526,6 @@ bool MainWindow::loadOriginalBin(const QString &path)
     // onOriginalBinComboChanged() (where the path is bound to the combo
     // index), not here. loadOriginalBin can also be called from the
     // browse dialog and doesn't need the mirror behaviour itself.
-    //
-    // If a modified bin is already loaded, refresh its protected
-    // snapshots from the new original. This keeps the snapshot bytes
-    // consistent with whatever the user considers the "stock" - even
-    // if they reload original after modified.
-    refreshProtectedSnapshots();
     refreshApplyStageButton();
     return true;
 }
@@ -534,14 +547,16 @@ bool MainWindow::loadModifiedBin(const QString &path)
     // Ctrl+Z after loading a different bin would write the OLD bin's
     // pre-edit bytes into NEW bin offsets - silent, dangerous corruption.
     if (m_undoStack) m_undoStack->clear();
-    // Set up protected-region snapshots so the calibration checksum
-    // word at 0x07BD7C and the ECU module ID stamps are preserved
-    // verbatim from the ORIGINAL bin into any saved modified bin.
-    // Source of truth for the snapshot bytes is the original (stock)
-    // bin - that's the value the ECU was running on, so by definition
-    // the ECU has accepted it. See Checksum.cpp profile and BinFile.h
-    // for the rationale (Bosch CRC algorithm not reverse-engineered).
-    refreshProtectedSnapshots();
+    // Note: previous versions installed "protected snapshots" here so
+    // the original bin's checksum bytes would be restored at save
+    // time. That approach was wrong - it produced bins with a
+    // mismatched checksum (immobilizer light, no-start) whenever the
+    // user actually modified calibration bytes. Checksum handling now
+    // happens at export time via Checksum::applyStrategies(), which
+    // either keeps the original CS (when block bytes are unchanged)
+    // or copies the CS from the optional reference bin (when block
+    // bytes match the reference) or refuses the export with a clear
+    // explanation. See Checksum.h header comments.
     statusBar()->showMessage(
         QStringLiteral("Modified bin: %1 (%2 bytes)")
             .arg(QFileInfo(path).fileName())
@@ -555,29 +570,22 @@ bool MainWindow::loadModifiedBin(const QString &path)
     return true;
 }
 
-void MainWindow::refreshProtectedSnapshots()
+void MainWindow::refreshReferenceBinUi()
 {
-    // Wire the originating bin's bytes into the modified bin's
-    // ProtectedSnapshot list. Called from both loadOriginalBin (when
-    // the orig bin changes) and loadModifiedBin (when the mod bin
-    // changes). Both call sites need to stay consistent: the snapshot
-    // bytes are taken from the ORIGINAL bin, not the modified one.
-    if (!m_modBin || !m_origBin || !m_driver) {
-        if (m_modBin) m_modBin->clearProtectedSnapshots();
+    // Refresh status bar message describing the loaded reference bin,
+    // if any. This is purely informational - the reference bin is
+    // consulted at export time, not during editing. Called from
+    // loadReferenceBin and onClearReferenceBin.
+    if (!m_refBin || m_refBinPath.isEmpty()) {
+        statusBar()->showMessage(
+            QStringLiteral("Reference bin: (none)"), 3000);
         return;
     }
-    const ChecksumProfile prof = Checksum::profileForSchema(m_driver->schemaId);
-    if (prof.protectedRegions.isEmpty()) {
-        m_modBin->clearProtectedSnapshots();
-        return;
-    }
-    QList<QPair<quint32, quint32>> regions;
-    QStringList descs;
-    for (const ProtectedRegion &pr : prof.protectedRegions) {
-        regions.append({pr.startOffset, pr.endOffset});
-        descs.append(pr.description);
-    }
-    m_modBin->setProtectedSnapshots(m_origBin->raw(), regions, descs);
+    statusBar()->showMessage(
+        QStringLiteral("Reference bin: %1 (%2 bytes)")
+            .arg(QFileInfo(m_refBinPath).fileName())
+            .arg(m_refBin->size()),
+        4000);
 }
 
 void MainWindow::refreshApplyStageButton()
@@ -1076,8 +1084,17 @@ void MainWindow::onVerifyChecksum()
                            "bin you intend to flash, not on the read-only Original."));
         return;
     }
+    if (!m_origBin) {
+        QMessageBox::information(this, QStringLiteral("Checksum"),
+            QStringLiteral(
+                "Load an Original (stock) bin first. The checksum dialog "
+                "needs the original to identify which blocks have changed "
+                "and which can keep their stored checksum verbatim."));
+        return;
+    }
     const QString schema = m_driver ? m_driver->schemaId : QString();
-    ChecksumDialog dlg(this, m_modBin.get(), m_modBinPath, schema, this);
+    ChecksumDialog dlg(this, m_modBin.get(), m_origBin.get(),
+                       m_refBin.get(), m_modBinPath, schema, this);
     dlg.exec();
 }
 
@@ -1141,6 +1158,99 @@ void MainWindow::onExportModifiedBin()
         return;
     }
 
+    // Pre-export checksum strategy. We need the original bin (always)
+    // and may use the optional reference bin. The original is our
+    // "safety net" - block bytes that didn't change keep their
+    // original stored checksum word. The reference bin lets the user
+    // copy a known-good checksum value when block bytes diverge from
+    // the original but match a previously-tuned bin.
+    //
+    // If neither path resolves a block, we refuse the export with a
+    // clear explanation. This prevents the failure mode the user hit
+    // (immobilizer light, no-start) from "preserving" a stock CS
+    // against modified bytes - the ECU rejects that combination.
+    if (!m_origBin) {
+        QMessageBox::warning(this, QStringLiteral("Export"),
+            QStringLiteral(
+                "Original bin is required for safe export.\n\n"
+                "EcuParser cannot recompute the Bosch EDC15C calibration "
+                "checksum (the algorithm is proprietary), so it relies on "
+                "the original bin's already-valid checksum words. Load the "
+                "stock bin via the Original combo and try again."));
+        return;
+    }
+
+    QString schemaId;
+    if (m_driver) schemaId = m_driver->schemaId;
+    if (schemaId.isEmpty()) {
+        // Fallback to bin signature detection when no driver is loaded
+        // - the schema string drives which checksum profile we apply.
+        schemaId = m_origBin->detectSchema();
+    }
+    const ChecksumProfile prof = Checksum::profileForSchema(schemaId);
+    if (prof.ranges.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("Export"),
+            QStringLiteral(
+                "No checksum profile available for schema '%1'. Refusing "
+                "to export - the ECU may reject a bin with stale checksum "
+                "words. Add a profile in Checksum.cpp or use a commercial "
+                "tool to flash this bin.")
+                .arg(schemaId.isEmpty() ? QStringLiteral("(unknown)") : schemaId));
+        return;
+    }
+
+    // Take a working copy of the modified bin, run the checksum
+    // strategy on it, and save the patched copy. We never mutate
+    // m_modBin in this path - keeping the in-memory state separate
+    // from the on-disk state means re-export is idempotent and the
+    // user's undo history is preserved.
+    BinFile patched(m_modBin->raw());
+    QStringList log;
+    const bool resolved = Checksum::applyStrategies(
+        &patched, *m_origBin, m_refBin.get(), prof, &log);
+
+    if (!resolved) {
+        // At least one block could not resolve. Show the user the per-
+        // block decisions and refuse to write.
+        QString detail = log.join(QStringLiteral("\n"));
+        if (detail.isEmpty()) {
+            detail = QStringLiteral("(no diagnostic log)");
+        }
+        QString hint = QStringLiteral(
+            "Cannot produce a flashable bin. The modified bytes in at "
+            "least one calibration block diverge from BOTH the original "
+            "and any loaded reference bin, and the Bosch CRC algorithm "
+            "is not implemented (no public reverse-engineered formula "
+            "exists).\n\n"
+            "Options:\n"
+            "  1. Load a known-good tuned bin via 'File > Reference "
+            "bin' that already contains valid checksums for your map "
+            "edits, then re-export.\n"
+            "  2. Use a commercial checksum corrector (WinOLS, ECM "
+            "Titanium, MPPS, Galletto, ECU.design online corrector) "
+            "on the saved bin before flashing.\n"
+            "  3. Revert the offending blocks to the original and "
+            "re-apply only edits the reference bin already contains.\n");
+        QMessageBox box(QMessageBox::Warning,
+            QStringLiteral("Export blocked: checksum unresolvable"),
+            hint, QMessageBox::NoButton, this);
+        box.setDetailedText(detail);
+        auto *saveAnyway = box.addButton(
+            QStringLiteral("Save without checksum fix"),
+            QMessageBox::DestructiveRole);
+        box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(QMessageBox::Cancel);
+        box.exec();
+        if (box.clickedButton() != saveAnyway) {
+            return;
+        }
+        // User opted to save anyway. Continue to the file dialog
+        // below; the bin will go to disk WITHOUT a corrected
+        // checksum and is meant to be processed by an external
+        // checksum tool. Make this explicit by suggesting a
+        // "_needs_checksum_fix" suffix.
+    }
+
     // Suggest a renamed default so we don't clobber the source bin.
     // When Modified was auto-mirrored from Original (same path), basing
     // the suggestion on Original's name still gives the right
@@ -1162,6 +1272,11 @@ void MainWindow::onExportModifiedBin()
                            Qt::CaseInsensitive)) {
             stem += QStringLiteral("_modified");
         }
+        if (!resolved
+            && !stem.endsWith(QStringLiteral("_needs_checksum_fix"),
+                              Qt::CaseInsensitive)) {
+            stem += QStringLiteral("_needs_checksum_fix");
+        }
         suggested = fi.absolutePath() + QStringLiteral("/")
                     + stem + QStringLiteral(".") + fi.suffix();
     }
@@ -1172,7 +1287,7 @@ void MainWindow::onExportModifiedBin()
     if (p.isEmpty())
         return;
     QString err;
-    if (!m_modBin->saveFile(p, &err)) {
+    if (!patched.saveFile(p, &err)) {
         QMessageBox::warning(this, QStringLiteral("Export"),
                              QStringLiteral("Save failed: %1").arg(err));
         return;
@@ -1180,6 +1295,32 @@ void MainWindow::onExportModifiedBin()
     m_modBinPath = p;
     m_modDirty = false;
     refreshTitle();
+
+    // Final user feedback. When fully resolved, show a per-block
+    // summary so the user knows which blocks the original CS was
+    // kept for and which were copied from the reference. When
+    // saved-anyway, make it loud that the file still needs fixing.
+    if (resolved) {
+        QMessageBox::information(this,
+            QStringLiteral("Export complete"),
+            QStringLiteral(
+                "Exported %1 with valid checksums.\n\n"
+                "Per-block decisions:\n%2")
+                .arg(QFileInfo(p).fileName(),
+                     log.isEmpty() ? QStringLiteral("(no log)")
+                                   : log.join(QStringLiteral("\n"))));
+    } else {
+        QMessageBox::warning(this,
+            QStringLiteral("Export complete (checksum fix REQUIRED)"),
+            QStringLiteral(
+                "Exported %1 WITHOUT a valid checksum.\n\n"
+                "Do NOT flash this file directly. Run it through a "
+                "commercial checksum corrector first (WinOLS, ECM "
+                "Titanium, MPPS, Galletto, ECU.design)."
+                "\n\nDiagnostic log:\n%2")
+                .arg(QFileInfo(p).fileName(),
+                     log.join(QStringLiteral("\n"))));
+    }
     statusBar()->showMessage(
         QStringLiteral("Exported: %1").arg(QFileInfo(p).fileName()), 4000);
 }
@@ -1233,6 +1374,58 @@ void MainWindow::onBrowseModifiedBin()
         m_modBinCombo->blockSignals(false);
     }
     m_modBinCombo->setCurrentIndex(idx);
+}
+
+void MainWindow::onBrowseReferenceBin()
+{
+    // The reference bin is an additional known-good calibration we
+    // can copy a stored checksum word from at export time. See
+    // Checksum.h for the rationale. The user typically points this
+    // at a previously-tuned bin whose checksum a commercial tool
+    // already corrected (so it boots and the ECU has accepted it).
+    const QString p = QFileDialog::getOpenFileName(
+        this, QStringLiteral("Open reference bin (optional)"),
+        AppPaths::binsDir(),
+        QStringLiteral("Bin files (*.bin);;All files (*)"));
+    if (p.isEmpty()) return;
+    loadReferenceBin(p);
+}
+
+void MainWindow::onClearReferenceBin()
+{
+    m_refBin.reset();
+    m_refBinPath.clear();
+    refreshReferenceBinUi();
+}
+
+bool MainWindow::loadReferenceBin(const QString &path)
+{
+    auto bin = std::make_unique<BinFile>();
+    QString err;
+    if (!bin->loadFile(path, &err)) {
+        QMessageBox::warning(this, QStringLiteral("Reference bin load"),
+                             QStringLiteral("Failed: %1").arg(err));
+        return false;
+    }
+    // Sanity check: reference bin must be the same size as the
+    // modified bin (otherwise we cannot map block offsets across
+    // them). We also warn if the original is loaded and its size
+    // differs - the export path will fail anyway, but flagging it
+    // here lets the user back out before they expect a working
+    // export.
+    if (m_modBin && bin->size() != m_modBin->size()) {
+        QMessageBox::warning(this,
+            QStringLiteral("Reference bin"),
+            QStringLiteral(
+                "Reference bin size (%1) does not match the modified bin "
+                "size (%2). Reference will not be usable for checksum "
+                "copying.")
+                .arg(bin->size()).arg(m_modBin->size()));
+    }
+    m_refBin = std::move(bin);
+    m_refBinPath = path;
+    refreshReferenceBinUi();
+    return true;
 }
 
 void MainWindow::refreshTitle()
